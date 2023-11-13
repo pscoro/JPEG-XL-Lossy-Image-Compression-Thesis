@@ -4,6 +4,10 @@ import os
 import glob
 import subprocess
 
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+
 from enum import Enum
 from PIL import Image
 from termcolor import colored
@@ -74,8 +78,8 @@ class ImageCompressionData:
             "Input Image Format",
             "Compressed Image Size",
             "Compressed Image Format",
-            "Delta Size",
-            "Percent Of Orig",
+            "Delta Image Size",
+            "% of Original Image Size",
                 ]
 
 
@@ -98,6 +102,7 @@ class Table:
             writer = csv.writer(file)
             writer.writerows(csv_data)
         print(f"CSV file '{csv_file}' has been created.")
+        return csv_file
 
     
     def create_col(self, col_name, col_data):
@@ -202,16 +207,31 @@ class JXLTester:
 
 
     def get_dataset_name(self, dataset_path):
+        dataset_path = dataset_path.removesuffix('/')
         return os.path.split(dataset_path)[1]
 
 
     def start_test_run(self, dataset_paths):
         self.create_curr_run_dirs()
         for dataset_path in dataset_paths:
+            if not self.args.all and not self.args.compress and not self.args.decompress:
+                return
+
             compress_output_path, compress_results_path = self.setup_paths(dataset_path, "compress")
             compression_table = self.compress_from_png(dataset_path, compress_output_path)
 
-            compression_table.to_csv(compress_results_path)
+            csv_file = compression_table.to_csv(compress_results_path)
+            if self.args.graph:
+                self.boxplot_csv_file(
+                    csv_file, 
+                    compression_table.title, 
+                    ImageCompressionData.get_col_names()[2],
+                    ImageCompressionData.get_col_names()[9],
+                    ImageCompressionData.get_col_names()[0]
+                )
+
+            if not self.args.decompress and not self.args.all:
+                return
 
             decompress_output_path, decompress_results_path = self.setup_paths(dataset_path, "decompress")
             run_output_files = self.decompress_to_png(compress_output_path, decompress_output_path)
@@ -219,14 +239,47 @@ class JXLTester:
             print("List of decompressed files:")
             print(run_output_files)
 
-            compare_output_path, compare_results_path = self.setup_paths(dataset_path, "comparison")
+            if not self.args.all:
+                return
+
+            compare_output_path, compare_results_path = self.setup_paths(dataset_path, "compare")
             self.compare_images(dataset_path, decompress_output_path, compare_output_path)
     
+
+    def boxplot_csv_file(self, csv_file, plot_title, x_col, y_col, label_col):
+        data = pd.read_csv(csv_file)
+        data[label_col] = data[label_col].apply(lambda img: os.path.split(img)[-1])
+        sns.boxplot(data=data, x=x_col, y=y_col)
+        grouped = data.groupby(x_col)[y_col]
+        min_points_index = grouped.idxmin()
+        max_points_index = grouped.idxmax()
+        min_points = data.loc[min_points_index].reset_index()
+        max_points = data.loc[max_points_index].reset_index()
+        extreme_points = pd.concat([min_points, max_points])
+        plt.title(plot_title)
+        for i in range(extreme_points.shape[0]):
+            x_pos = extreme_points[x_col].iloc[i] - 1.25
+            if i < len(min_points):
+                y_pos = extreme_points[y_col].iloc[i] - 0.25
+            else:
+                y_pos = extreme_points[y_col].iloc[i] + 0.2
+
+            plt.text(x_pos, y_pos, extreme_points[label_col].iloc[i], fontsize=5)
+
+        save_file = os.path.splitext(csv_file)[0] + "-boxplot.png"
+        plt.savefig(save_file, dpi=300)
+        print(f"Saved {save_file}")
+        plt.show()
+
 
     def parse_arguments(self):
         parser = argparse.ArgumentParser(description="Process png images in a given directory.")
         parser.add_argument('-t', '--test_set', required=False, type=str, help='Directory containing png images')
         parser.add_argument('-ts', '--test_sets', required=False, type=str, help='Directories containing png images')
+        parser.add_argument('-a', '--all', required=False, action='store_true', help='Run all stages [compress, decompress, compare]')
+        parser.add_argument('--compress', required=False, action='store_true', help='Only run the compress stage')
+        parser.add_argument('--decompress', required=False, action='store_true', help='Only run the compress and decompress stages')
+        parser.add_argument('-g', '--graph', required=False, action='store_true', help='Generate graph(s) for each applicable stage')
         #parser.add_argument('-i', '--include', required=False, type=str, help='Include a output statistic')
         #parser.add_argument('-e', '--include', required=False, type=str, help='Exclude a output statistic')
         #parser.add_argument('-d', '--defaults', required=False, type=str, help='Use default statistics')
@@ -251,7 +304,7 @@ class JXLTester:
 
     def compress_from_png(self, input_dir, output_dir):
         dataset_name = self.get_dataset_name(input_dir)
-        table = Table(f"Compression Data for Image Dataset {dataset_name}",
+        table = Table(f"Compression Data for Image Dataset: {dataset_name}",
                 ImageCompressionData.get_col_names())       
         input_files = self.get_images_in_dir(input_dir, SupportedImageExt.PNG)
 
