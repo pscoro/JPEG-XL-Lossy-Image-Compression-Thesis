@@ -13,7 +13,18 @@ from PIL import Image
 from termcolor import colored
 
 DIFF_TOOL = "compare"
-EFFORT_LEVELS = 10
+EFFORT_LEVELS = 9
+DISTANCE_LEVELS = [
+    0.0,
+    0.5,
+    1.0,
+    2.0,
+    3.0,
+    5.0,
+    10.0,
+    15.0,
+    25.0,
+]
 
 class ImageHelper:
     @staticmethod
@@ -50,36 +61,100 @@ class Command:
 class ImageCompressionData:
     def __init__(
             self,
-            input_image_path,
+            orig_image_path,
             compressed_image_path,
             compression_effort,
+            compression_distance,
             ):
-        self.input_image_path = input_image_path
+        self.orig_image_path = orig_image_path
         self.compressed_image_path = compressed_image_path
         self.compression_effort = compression_effort
+        self.compression_distance = compression_distance
 
-        self.image_dims = ImageHelper.get_image_dims(input_image_path)
-        self.input_image_size = ImageHelper.get_image_size(input_image_path)
-        self.input_image_format = ImageHelper.get_image_format(input_image_path)
+        self.image_dims = ImageHelper.get_image_dims(orig_image_path)
+        self.orig_image_size = ImageHelper.get_image_size(orig_image_path)
+        self.orig_image_format = ImageHelper.get_image_format(orig_image_path)
         self.compressed_image_size = ImageHelper.get_image_size(compressed_image_path)
         self.compressed_image_format = ImageHelper.get_image_format(compressed_image_path)
-        self.delta_size = self.compressed_image_size - self.input_image_size
-        self.percent_of_orig = self.compressed_image_size / self.input_image_size * 100
+        self.delta_size = self.compressed_image_size - self.orig_image_size
+        self.percent_of_orig = self.compressed_image_size / self.orig_image_size * 100
 
 
     @staticmethod
     def get_col_names():
         return [
-            "Input Image Path",
+            "Original Image Path",
             "Compressed Image Path",
             "Compression Effort",
+            "Compression Distance",
             "Image Dims",
-            "Input Image Size",
-            "Input Image Format",
+            "Original Image Size",
+            "Original Image Format",
             "Compressed Image Size",
             "Compressed Image Format",
             "Delta Image Size",
             "% of Original Image Size",
+                ]
+
+
+class ImageDecompressionData:
+    def __init__(
+            self,
+            orig_image_path,
+            compressed_image_path,
+            decompressed_image_path,
+            compression_effort,
+            compression_distance,
+            ):
+        self.orig_image_path = orig_image_path
+        self.compressed_image_path = compressed_image_path
+        self.decompressed_image_path = decompressed_image_path
+
+        self.compression_effort = compression_effort
+        self.compression_distance = compression_distance
+        self.image_dims = ImageHelper.get_image_dims(orig_image_path)
+
+        self.orig_image_size = ImageHelper.get_image_size(orig_image_path)
+        self.orig_image_format = ImageHelper.get_image_format(orig_image_path)
+
+        self.compressed_image_size = ImageHelper.get_image_size(compressed_image_path)
+        self.compressed_image_format = ImageHelper.get_image_format(compressed_image_path)
+
+        self.decompressed_image_size = ImageHelper.get_image_size(decompressed_image_path)
+        self.decompressed_image_format = ImageHelper.get_image_format(decompressed_image_path)
+
+        self.delta_size_orig = self.decompressed_image_size - self.orig_image_size
+        self.percent_of_orig = self.decompressed_image_size / self.orig_image_size * 100
+
+        self.delta_size_compressed = self.decompressed_image_size - self.compressed_image_size
+        self.percent_of_compressed = self.decompressed_image_size / self.compressed_image_size * 100
+
+
+    @staticmethod
+    def get_col_names():
+        return [
+            "Original Image Path",
+            "Compressed Image Path",
+            "Decompressed Image Path",
+
+            "Compression Effort",
+            "Compression Distance",
+            "Image Dims",
+
+            "Original Image Size",
+            "Original Image Format",
+
+            "Compressed Image Size",
+            "Compressed Image Format",
+
+            "Decompressed Image Size",
+            "Decompressed Image Format",
+
+            "Delta Original Image Size",
+            "% of Original Image Size",
+
+            "Delta Compressed Image Size",
+            "% of Compressed Image Size",
                 ]
 
 
@@ -119,16 +194,39 @@ class Table:
 
     def create_row_from_compression_data(self, cd):
         row_data = [
-            cd.input_image_path,
+            cd.orig_image_path,
             cd.compressed_image_path,
             cd.compression_effort,
+            cd.compression_distance,
             cd.image_dims,
-            cd.input_image_size,
-            cd.input_image_format,
+            cd.orig_image_size,
+            cd.orig_image_format,
             cd.compressed_image_size,
             cd.compressed_image_format,
             cd.delta_size,
             cd.percent_of_orig,
+                ]
+        self.data.append(row_data)
+
+
+    def create_row_from_decompression_data(self, dd):
+        row_data = [
+            dd.orig_image_path,
+            dd.compressed_image_path,
+            dd.decompressed_image_path,
+            dd.compression_effort,
+            dd.compression_distance,
+            dd.image_dims,
+            dd.orig_image_size,
+            dd.orig_image_format,
+            dd.compressed_image_size,
+            dd.compressed_image_format,
+            dd.decompressed_image_size,
+            dd.decompressed_image_format,
+            dd.delta_size_orig,
+            dd.percent_of_orig,
+            dd.delta_size_compressed,
+            dd.percent_of_compressed,
                 ]
         self.data.append(row_data)
 
@@ -217,16 +315,21 @@ class JXLTester:
             if not self.args.all and not self.args.compress and not self.args.decompress:
                 return
 
+            dataset_name = self.get_dataset_name(dataset_path)
+
             compress_output_path, compress_results_path = self.setup_paths(dataset_path, "compress")
             compression_table = self.compress_from_png(dataset_path, compress_output_path)
 
-            csv_file = compression_table.to_csv(compress_results_path)
+            compress_csv_file = compression_table.to_csv(compress_results_path)
             if self.args.graph:
+                graph_name = f"Compressed Image Size as % of Original Image for Dataset: {dataset_name}"
+
                 self.boxplot_csv_file(
-                    csv_file, 
-                    compression_table.title, 
+                    compress_csv_file, 
+                    graph_name, 
                     ImageCompressionData.get_col_names()[2],
-                    ImageCompressionData.get_col_names()[9],
+                    ImageCompressionData.get_col_names()[10],
+                    ImageCompressionData.get_col_names()[3],
                     ImageCompressionData.get_col_names()[0]
                 )
 
@@ -234,10 +337,30 @@ class JXLTester:
                 return
 
             decompress_output_path, decompress_results_path = self.setup_paths(dataset_path, "decompress")
-            run_output_files = self.decompress_to_png(compress_output_path, decompress_output_path)
+            decompression_table = self.decompress_to_png(dataset_path, compress_output_path, decompress_output_path)
 
-            print("List of decompressed files:")
-            print(run_output_files)
+            decompress_csv_file = decompression_table.to_csv(decompress_results_path)
+            if self.args.graph:
+                graph_name_orig = f"Decompressed Image Size as % of Original Image for Dataset: {dataset_name}"
+                graph_name_compress = f"Decompressed Image Size as % of Compressed Image for Dataset: {dataset_name}"
+
+                self.boxplot_csv_file(
+                    decompress_csv_file, 
+                    graph_name_orig,
+                    ImageDecompressionData.get_col_names()[3],
+                    ImageDecompressionData.get_col_names()[13],
+                    ImageDecompressionData.get_col_names()[4],
+                    ImageDecompressionData.get_col_names()[0]
+                )
+
+                self.boxplot_csv_file(
+                    decompress_csv_file, 
+                    graph_name_compress,
+                    ImageDecompressionData.get_col_names()[3],
+                    ImageDecompressionData.get_col_names()[15],
+                    ImageDecompressionData.get_col_names()[4],
+                    ImageDecompressionData.get_col_names()[0]
+                )
 
             if not self.args.all:
                 return
@@ -246,30 +369,52 @@ class JXLTester:
             self.compare_images(dataset_path, decompress_output_path, compare_output_path)
     
 
-    def boxplot_csv_file(self, csv_file, plot_title, x_col, y_col, label_col):
+    def boxplot_csv_file(self, csv_file, plot_title, x_col, y_col, z_col, label_col):
         data = pd.read_csv(csv_file)
-        data[label_col] = data[label_col].apply(lambda img: os.path.split(img)[-1])
-        sns.boxplot(data=data, x=x_col, y=y_col)
-        grouped = data.groupby(x_col)[y_col]
-        min_points_index = grouped.idxmin()
-        max_points_index = grouped.idxmax()
-        min_points = data.loc[min_points_index].reset_index()
-        max_points = data.loc[max_points_index].reset_index()
-        extreme_points = pd.concat([min_points, max_points])
-        plt.title(plot_title)
-        for i in range(extreme_points.shape[0]):
-            x_pos = extreme_points[x_col].iloc[i] - 1.25
-            if i < len(min_points):
-                y_pos = extreme_points[y_col].iloc[i] - 0.25
+        data[x_col] = data[x_col].astype(str)
+        data[z_col] = data[z_col].astype(str)
+        unique_z_values = data[z_col].dropna().unique()
+        fig, axes = plt.subplots(nrows=3, ncols=3, figsize=(15, 15))
+        axes = axes.flatten()
+
+        for i, z_value in enumerate(unique_z_values):
+            ax = axes[i]
+            subset_data = data[data[z_col] == z_value].dropna(subset=[x_col, y_col])
+            if not subset_data.empty:
+                sns.boxplot(data=subset_data, x=x_col, y=y_col, ax=ax)
+                ax.set_title(f'{plot_title} - {z_col}: {z_value}', fontsize=7)
+
+                data[label_col] = data[label_col].apply(lambda img: os.path.split(img)[-1])
+                sns.boxplot(data=data, x=x_col, y=y_col)
+#                grouped = data.groupby(x_col)[y_col]
+#                min_points_index = grouped.idxmin()
+#                max_points_index = grouped.idxmax()
+#                min_points = data.loc[min_points_index].reset_index()
+#                max_points = data.loc[max_points_index].reset_index()
+#                extreme_points = pd.concat([min_points, max_points])
+#                plt.title(plot_title)
+#                for i in range(extreme_points.shape[0]):
+#                    x_pos = extreme_points[x_col].iloc[i] - 1.25
+#                    if i < len(min_points):
+#                        y_pos = extreme_points[y_col].iloc[i] - 0.25
+#                    else:
+#                        y_pos = extreme_points[y_col].iloc[i] + 0.2
+
+#                    plt.text(x_pos, y_pos, extreme_points[label_col].iloc[i], fontsize=5)
+
             else:
-                y_pos = extreme_points[y_col].iloc[i] + 0.2
+                ax.set_visible(False)
 
-            plt.text(x_pos, y_pos, extreme_points[label_col].iloc[i], fontsize=5)
+        for j in range(i + 1, len(axes)):
+            axes[j].set_visible(False)
 
-        save_file = os.path.splitext(csv_file)[0] + "-boxplot.png"
+        plt.tight_layout()
+        save_file = f"{plot_title}-boxplot.png"
+        save_file = os.path.join(os.path.split(csv_file)[0], save_file)
         plt.savefig(save_file, dpi=300)
         print(f"Saved {save_file}")
         plt.show()
+        plt.clf()
 
 
     def parse_arguments(self):
@@ -302,41 +447,59 @@ class JXLTester:
             exit(1)
         
 
-    def compress_from_png(self, input_dir, output_dir):
-        dataset_name = self.get_dataset_name(input_dir)
+    def compress_from_png(self, orig_dir, compress_dir):
+        dataset_name = self.get_dataset_name(orig_dir)
         table = Table(f"Compression Data for Image Dataset: {dataset_name}",
-                ImageCompressionData.get_col_names())       
-        input_files = self.get_images_in_dir(input_dir, SupportedImageExt.PNG)
+                ImageCompressionData.get_col_names())
+        orig_files = self.get_images_in_dir(orig_dir, SupportedImageExt.PNG)
 
-        for png_file in input_files:
-            file_name = os.path.split(os.path.splitext(png_file)[0])[1]
-            output_file = f"{output_dir}/{file_name}.jxl"
+        for orig_file in orig_files:
+            file_name = os.path.split(os.path.splitext(orig_file)[0])[1]
 
             effort = 1
             while effort <= EFFORT_LEVELS:
-                self.run_command(Command(f"cjxl -e {effort} {png_file} {output_file}")) 
-                compression_data = ImageCompressionData(
-                        input_image_path = png_file,
-                        compressed_image_path = output_file,
-                        compression_effort = effort)
-                table.create_row_from_compression_data(compression_data)
+                for distance in DISTANCE_LEVELS:
+                    compress_file = f"{compress_dir}/{file_name}-d{distance}-e{effort}.jxl"
+                    self.run_command(Command(f"cjxl -d {distance} -e {effort} {orig_file} {compress_file}")) 
+                    compression_data = ImageCompressionData(
+                            orig_image_path = orig_file,
+                            compressed_image_path = compress_file,
+                            compression_effort = effort,
+                            compression_distance = distance)
+                    table.create_row_from_compression_data(compression_data)
+
                 effort += 1
 
         return table
 
 
-    def decompress_to_png(self, input_dir, output_dir):
-        run_output_files = []
-        
-        input_files = self.get_images_in_dir(input_dir, SupportedImageExt.JXL)
+    def decompress_to_png(self, orig_dir, compress_dir, decompress_dir):
+        dataset_name = self.get_dataset_name(orig_dir)
+        table = Table(f"Decompression Data for Image Dataset: {dataset_name}",
+                ImageDecompressionData.get_col_names())
+        orig_files = self.get_images_in_dir(orig_dir, SupportedImageExt.PNG)
+        compress_files = self.get_images_in_dir(compress_dir, SupportedImageExt.JXL)
 
-        for jxl_file in input_files:
-            file_name = os.path.split(os.path.splitext(jxl_file)[0])[1]
-            output_file = f"{output_dir}/{file_name}.png"
-            self.run_command(Command(f"djxl {jxl_file} {output_file}")) 
-            run_output_files.append(output_file)
+        for orig_file in orig_files:
+            file_name = os.path.split(os.path.splitext(orig_file)[0])[1]
 
-        return run_output_files
+            effort = 1
+            while effort <= EFFORT_LEVELS:
+                for distance in DISTANCE_LEVELS:
+                    compress_file = f"{compress_dir}/{file_name}-d{distance}-e{effort}.jxl"
+                    decompress_file = f"{decompress_dir}/{file_name}-d{distance}-e{effort}.png"
+                    self.run_command(Command(f"djxl {compress_file} {decompress_file}")) 
+                    decompression_data = ImageDecompressionData(
+                            orig_image_path = orig_file,
+                            compressed_image_path = compress_file,
+                            decompressed_image_path = decompress_file,
+                            compression_effort = effort,
+                            compression_distance = distance)
+                    table.create_row_from_decompression_data(decompression_data)
+
+                effort += 1
+
+        return table
 
 
     def compare_images(self, before_dir, after_dir, result_dir):
