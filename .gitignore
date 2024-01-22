@@ -1,10 +1,10 @@
 /target
 /libjxl
-/benchmark-jpegxl/test-image-set
+/benchmark-jpegxl/test_images
 /benchmark-jpegxl/target
 /benchmark-jpegxl/.DS_Store
 /benchmark-jpegxl/.idea
 /benchmark-jpegxl/benchmarks/temp
 .DS_Store
 .idea
-
+**/output

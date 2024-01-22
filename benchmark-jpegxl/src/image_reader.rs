@@ -2,7 +2,6 @@ use serde::{Serialize, Serializer};
 use serde_derive::Serialize;
 
 use image::DynamicImage;
-use std::fs::File;
 use std::path::Path;
 
 use jpegxl_rs::decode::{JxlDecoder, Metadata, Pixels};
@@ -107,7 +106,7 @@ impl From<image::ColorType> for ColorType {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum ImageFormat {
     JpegXl,
     Png,
@@ -296,7 +295,7 @@ impl ImageReader {
 
     fn read_jxl(file_path: String) -> ImageReader {
         let sample = std::fs::read(file_path.clone()).unwrap();
-        let mut decoder: JxlDecoder = decoder_builder().build().unwrap();
+        let decoder: JxlDecoder = decoder_builder().build().unwrap();
         let (metadata, pixels) = decoder.decode(&sample).unwrap();
         ImageReader {
             image: None,
@@ -342,8 +341,6 @@ impl ImageReader {
     }
 
     fn get_raw_size(file_path: &String) -> usize {
-        let path = Path::new(file_path);
-        let extension = path.extension().unwrap().to_str().unwrap();
         let image = image::open(&file_path).unwrap();
         let color_space = image.color();
         let width = image.width();
