@@ -2,12 +2,13 @@ use clap::Parser;
 use clap_derive::Parser;
 use std::fs;
 use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::Mutex;
 
 use benchmark_jpegxl::benchmark::{
-    Benchmarker, /*CollectImageMetadataBenchmark,*/ JXLCompressionBenchmark,
+    Benchmarker, /*CollectImageMetadataBenchmark,*/ JXLCompressionBenchmark, Benchmark,
 };
 use benchmark_jpegxl::config::Config;
-use benchmark_jpegxl::docker_manager::DockerManager;
 
 /// Arguments
 /// `--clean, -c` - Clean all benchmark files
@@ -31,10 +32,10 @@ fn main() {
     let config = Config::default();
 
     println!("Setting up benchmark directory");
-    let benchmark_path = config.BENCHMARK_DIR_PATH.to_owned()
+    let benchmark_path = config.benchmark_dir_path.to_owned()
         + match args.temp {
             true => "/temp",
-            false => match config.USE_TEMP_DIR {
+            false => match config.use_temp_dir {
                 true => "/temp",
                 false => "",
             },
@@ -54,8 +55,8 @@ fn main() {
     println!("Setting up benchmarker");
     let mut benchmarker = Benchmarker::new(
         benchmark_path,
-        config.LOCAL_TEST_IMAGE_DIR_PATH.to_owned(),
-        config.DOCKER_TEST_IMAGE_DIR_PATH.to_owned(),
+        config.local_test_image_dir_path.to_owned(),
+        config.docker_test_image_dir_path.to_owned(),
         8,
     );
 
@@ -64,14 +65,11 @@ fn main() {
     //    benchmarker.run_benchmark(&collect_image_metadata_benchmark);
 
     println!("Running JPEG-XL Compression benchmark");
-    let jpegxl_compression_benchmark = JXLCompressionBenchmark::new(&benchmarker);
-    benchmarker.run_benchmark(&jpegxl_compression_benchmark);
+    let jpegxl_compression_benchmark = JXLCompressionBenchmark::new(&mut benchmarker);
+    let benchmark = Arc::new(Mutex::new(jpegxl_compression_benchmark));
+    benchmarker.run_benchmark(benchmark);
 
-    let res = docker_manager.teardown();
-    match res {
-        Ok(_) => println!("Teardown complete"),
-        Err(err) => println!("Error {}", err),
-    }
+    benchmarker.teardown();
 }
 
 fn all_dirs_in(path: &str) -> Vec<String> {

@@ -2,18 +2,16 @@ use std::collections::HashMap;
 use std::error::Error;
 use std::process::Command;
 
-use crate::benchmark::BenchmarkWorker;
-
 #[derive(Debug, Clone)]
-pub struct DockerManager<'a> {
+pub struct DockerManager {
     pub id: usize,
     pub dockerfile: String,
     pub image_name: Option<String>,
     pub container_name: Option<String>,
-    containers: HashMap<&'a BenchmarkWorker<'a>, String>,
+    containers: HashMap<usize, String>,
 }
 
-impl<'a> DockerManager<'a> {
+impl DockerManager {
     pub const IMAGE_NAME: &'static str = "benchmark-libjxl-image";
     pub const CONTAINER_NAME: &'static str = "benchmark-libjxl-container";
 
@@ -55,7 +53,7 @@ impl<'a> DockerManager<'a> {
     /// Sets up a docker container for a benchmark worker.
     /// # Returns
     /// * `Result<(), Error>` - An error if the setup fails.
-    pub fn setup(&mut self, worker: &BenchmarkWorker) -> Result<(), Box<dyn Error>> {
+    pub fn setup(&mut self, worker_id: usize) -> Result<(), Box<dyn Error>> {
         println!("Setting up docker container...");
 
         // Create the container.
@@ -90,8 +88,8 @@ impl<'a> DockerManager<'a> {
                     )?;
                 }
         */
-        let worker_container_name = format!("{}-{}", self.container_name.as_ref().unwrap(), worker.id);
-        self.containers.insert(worker, worker_container_name.clone());
+        let worker_container_name = format!("{}-{}", self.container_name.as_ref().unwrap(), worker_id);
+        self.containers.insert(worker_id, worker_container_name.clone());
         // Start the container.
         println!("Starting docker container...");
         self.execute_command(

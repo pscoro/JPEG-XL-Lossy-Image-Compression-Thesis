@@ -1,29 +1,31 @@
 pub struct Config {
-    pub APPLICATION_NAME: &'static str,
-    pub APPLICATION_AUTHOR: &'static str,
-    pub APPLICATION_VERSION: &'static str,
-    pub APPLICATION_DESCRIPTION: &'static str,
+    pub application_name: &'static str,
+    pub application_author: &'static str,
+    pub application_version: &'static str,
+    pub application_description: &'static str,
 
-    pub BENCHMARK_DIR_PATH: &'static str,
-    pub DOCKER_FILE_PATH: &'static str,
-    pub LOCAL_TEST_IMAGE_DIR_PATH: &'static str,
-    pub DOCKER_TEST_IMAGE_DIR_PATH: &'static str,
+    pub benchmark_dir_path: &'static str,
+    pub docker_file_path: &'static str,
+    pub local_test_image_dir_path: &'static str,
+    pub docker_test_image_dir_path: &'static str,
 
-    pub USE_TEMP_DIR: bool,
+    pub use_temp_dir: bool,
 }
 
 impl Default for Config {
     fn default() -> Self {
         Config {
-            APPLICATION_NAME: "JPEG-XL Benchmark Tool",
-            APPLICATION_AUTHOR: "",
-            APPLICATION_VERSION: "0.1.0",
-            APPLICATION_DESCRIPTION: "A benchmark tool for the JPEG-XL image codec",
-            BENCHMARK_DIR_PATH: "./benchmarks",
-            DOCKER_FILE_PATH: "./Dockerfile",
-            LOCAL_TEST_IMAGE_DIR_PATH: "test_images",
-            DOCKER_TEST_IMAGE_DIR_PATH: "/test_images",
-            USE_TEMP_DIR: false,
+            application_name: "JPEG-XL Benchmark",
+            application_author: "",
+            application_version: "0.1.0",
+            application_description: "A benchmark tool for the JPEG-XL image format",
+
+            benchmark_dir_path: "./benchmark",
+            docker_file_path: "./Dockerfile",
+            local_test_image_dir_path: "./test_images",
+            docker_test_image_dir_path: "/test_images",
+            
+            use_temp_dir: false,
         }
     }
 }
