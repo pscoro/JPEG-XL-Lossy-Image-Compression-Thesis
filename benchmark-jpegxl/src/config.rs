@@ -24,7 +24,7 @@ impl Default for Config {
             docker_file_path: "./Dockerfile",
             local_test_image_dir_path: "./test_images",
             docker_test_image_dir_path: "/test_images",
-            
+
             use_temp_dir: false,
         }
     }

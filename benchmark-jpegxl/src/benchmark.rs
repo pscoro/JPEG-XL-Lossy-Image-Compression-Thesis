@@ -4,17 +4,37 @@ use crate::csv_writer::ImageFileDataCSVWriter;
 use crate::docker_manager::DockerManager;
 use crate::image_reader::{ImageFormat, ImageReader};
 
-use std::error::Error;
 use std::fs;
 use std::path::PathBuf;
-use std::sync::Arc;
-use std::sync::Mutex;
+
+pub trait Benchmark: Sync + Send {
+    fn run(docker_manager: DockerManager, payload: &WorkerPayload);
+}
+
+pub struct JXLCompressionBenchmark {}
+
+#[derive(Debug)]
+pub struct Benchmarker {
+    pub benchmark_dir: String,
+    pub test_sets: Vec<String>,
+    pub current_run: usize,
+    pub local_test_image_dir: String,
+    pub docker_test_image_dir: String,
+    pub num_workers: usize,
+    pub workers: Vec<BenchmarkWorker>,
+    pub current_worker_id: usize,
+}
 
 #[derive(Debug)]
 pub struct BenchmarkWorker {
     pub id: usize,
     pub docker_manager: Option<DockerManager>,
     pub thread_handle: Option<std::thread::JoinHandle<()>>,
+    pub payload: Option<WorkerPayload>,
+}
+
+#[derive(Debug, Clone)]
+pub struct WorkerPayload {
     pub benchmark_dir: String,
     pub test_sets: Vec<String>,
     pub current_run: usize,
@@ -23,7 +43,7 @@ pub struct BenchmarkWorker {
     pub current_worker_id: usize,
     pub current_output_dir: String,
     pub current_result_dir: String,
-    pub current_image_name: String, // "kodim06"
+    pub current_image_name: String,      // "kodim06"
     pub current_image_file_path: String, // "kodim/kodim06.png"
     pub current_image_format: ImageFormat,
 }
@@ -42,73 +62,29 @@ impl std::hash::Hash for BenchmarkWorker {
     }
 }
 
-impl Clone for BenchmarkWorker {
-    fn clone(&self) -> Self {
-        BenchmarkWorker {
-            id: self.id,
-            docker_manager: None,
-            thread_handle: None,
-            benchmark_dir: self.benchmark_dir.clone(),
-            test_sets: self.test_sets.clone(),
-            current_run: self.current_run,
-            local_test_image_dir: self.local_test_image_dir.clone(),
-            docker_test_image_dir: self.docker_test_image_dir.clone(),
-            current_worker_id: self.current_worker_id,
-            current_output_dir: self.current_output_dir.clone(),
-            current_result_dir: self.current_result_dir.clone(),
-            current_image_name: self.current_image_name.clone(),
-            current_image_file_path: self.current_image_file_path.clone(),
-            current_image_format: self.current_image_format.clone(),
-        }
-    }
-}
-
 impl BenchmarkWorker {
     pub fn new(id: usize, payload: &WorkerPayload) -> BenchmarkWorker {
         BenchmarkWorker {
             id,
             docker_manager: None,
             thread_handle: None,
-            benchmark_dir: payload.benchmark_dir.clone(),
-            test_sets: payload.test_sets.clone(),
-            current_run: payload.current_run,
-            local_test_image_dir: payload.local_test_image_dir.clone(),
-            docker_test_image_dir: payload.docker_test_image_dir.clone(),
-            current_worker_id: payload.current_worker_id,
-            current_output_dir: payload.current_output_dir.clone(),
-            current_result_dir: payload.current_result_dir.clone(),
-            current_image_name: payload.current_image_name.clone(),
-            current_image_file_path: payload.current_image_file_path.clone(),
-            current_image_format: payload.current_image_format.clone(),
+            payload: Some(payload.clone()),
         }
     }
 
-    pub fn run(&mut self, benchmark: Arc<Mutex<dyn Benchmark>>) {
-        let payload = WorkerPayload::from(self.clone());
-        let benchmark_clone = Arc::clone(&benchmark);
+    pub fn run<T: Benchmark + 'static>(&mut self) {
+        let payload = self.payload.as_ref().unwrap().clone();
+        if self.thread_handle.is_some() {
+            self.thread_handle.take().unwrap().join().unwrap();
+        }
+        let docker = self.docker_manager.as_mut().unwrap().clone();
         self.thread_handle = Some(std::thread::spawn(move || {
-            let mut benchmark = benchmark_clone.lock().unwrap();
-            benchmark.run(payload);
+            T::run(docker, &payload);
         }));
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct WorkerPayload {
-    pub benchmark_dir: String,
-    pub test_sets: Vec<String>,
-    pub current_run: usize,
-    pub local_test_image_dir: String,
-    pub docker_test_image_dir: String,
-    pub current_worker_id: usize,
-    pub current_output_dir: String,
-    pub current_result_dir: String,
-    pub current_image_name: String, // "kodim06"
-    pub current_image_file_path: String, // "kodim/kodim06.png"
-    pub current_image_format: ImageFormat,
-}
-
-impl WorkerPayload { 
+impl WorkerPayload {
     pub fn get_output_dir(benchmark_dir: String, current_run: usize) -> String {
         format!("{}/{}/output", benchmark_dir, current_run)
     }
@@ -118,43 +94,18 @@ impl WorkerPayload {
     }
 
     pub fn get_output_path_for(&self, file_path: String) -> String {
-        format!("{}/{}/output/{}", self.benchmark_dir, self.current_run, file_path)
+        format!(
+            "{}/{}/output/{}",
+            self.benchmark_dir, self.current_run, file_path
+        )
     }
 
     pub fn get_result_path_for(&self, file_path: String) -> String {
-        format!("{}/{}/results/{}", self.benchmark_dir, self.current_run, file_path)
+        format!(
+            "{}/{}/results/{}",
+            self.benchmark_dir, self.current_run, file_path
+        )
     }
-}
-
-impl From<BenchmarkWorker> for WorkerPayload {
-    fn from(worker: BenchmarkWorker) -> Self {
-        WorkerPayload {
-            benchmark_dir: worker.benchmark_dir.clone(),
-            test_sets: worker.test_sets.clone(),
-            current_run: worker.current_run,
-            local_test_image_dir: worker.local_test_image_dir.clone(),
-            docker_test_image_dir: worker.docker_test_image_dir.clone(),
-            current_worker_id: worker.id,
-            current_output_dir: worker.current_output_dir.clone(),
-            current_result_dir: worker.current_result_dir.clone(),
-            current_image_name: worker.current_image_name.clone(),
-            current_image_file_path: worker.current_image_file_path.clone(),
-            current_image_format: worker.current_image_format.clone(),
-        }
-    }
-}
-
-
-#[derive(Debug)]
-pub struct Benchmarker {
-    pub benchmark_dir: String,
-    pub test_sets: Vec<String>,
-    pub current_run: usize,
-    pub local_test_image_dir: String,
-    pub docker_test_image_dir: String,
-    pub num_workers: usize,
-    pub workers: Vec<BenchmarkWorker>,
-    pub current_worker_id: usize,
 }
 
 impl Clone for Benchmarker {
@@ -172,26 +123,13 @@ impl Clone for Benchmarker {
     }
 }
 
-impl From<Benchmarker> for WorkerPayload {
-    fn from(benchmarker: Benchmarker) -> Self {
-        WorkerPayload {
-            benchmark_dir: benchmarker.benchmark_dir.clone(),
-            test_sets: benchmarker.test_sets.clone(),
-            current_run: benchmarker.current_run,
-            local_test_image_dir: benchmarker.local_test_image_dir.clone(),
-            docker_test_image_dir: benchmarker.docker_test_image_dir.clone(),
-            current_worker_id: benchmarker.current_worker_id,
-            current_output_dir: String::new(),
-            current_result_dir: String::new(),
-            current_image_name: String::new(),
-            current_image_file_path: String::new(),
-            current_image_format: ImageFormat::Unsupported,
-        }
-    }
-}
-
 impl Benchmarker {
-    pub fn new(benchmark_dir: String, local_test_image_dir: String, docker_test_image_dir: String, num_workers: usize) -> Benchmarker {
+    pub fn new(
+        benchmark_dir: String,
+        local_test_image_dir: String,
+        docker_test_image_dir: String,
+        num_workers: usize,
+    ) -> Benchmarker {
         let dir = PathBuf::from(benchmark_dir.clone());
         if !dir.exists() {
             fs::create_dir_all(dir).unwrap();
@@ -200,17 +138,35 @@ impl Benchmarker {
         let mut b = Benchmarker {
             benchmark_dir: benchmark_dir.clone(),
             test_sets: Benchmarker::get_all_test_set_names(local_test_image_dir.clone()),
-            current_run: Benchmarker::get_current_run(benchmark_dir),
+            current_run: Benchmarker::get_current_run(benchmark_dir.clone()),
             local_test_image_dir: local_test_image_dir.clone(),
             docker_test_image_dir: docker_test_image_dir.clone(),
             num_workers,
-            workers: Vec::new(), 
+            workers: Vec::new(),
             current_worker_id: 0,
         };
         let config = Config::default();
         for x in 0..b.num_workers {
             println!("Spawning worker {}", x);
-            let payload = WorkerPayload::from(b.clone());
+            let payload = WorkerPayload {
+                benchmark_dir: benchmark_dir.clone(),
+                test_sets: b.test_sets.clone(),
+                current_run: b.current_run,
+                local_test_image_dir: local_test_image_dir.clone(),
+                docker_test_image_dir: docker_test_image_dir.clone(),
+                current_worker_id: x,
+                current_output_dir: Benchmarker::get_output_dir(
+                    benchmark_dir.clone(),
+                    b.current_run,
+                ),
+                current_result_dir: Benchmarker::get_result_dir(
+                    benchmark_dir.clone(),
+                    b.current_run,
+                ),
+                current_image_name: "".to_string(),
+                current_image_file_path: "".to_string(),
+                current_image_format: ImageFormat::Unsupported,
+            };
             let mut worker = BenchmarkWorker::new(x, &payload);
             println!("Setting up docker");
             let mut docker_manager = DockerManager::new(&config.docker_file_path, x);
@@ -243,11 +199,17 @@ impl Benchmarker {
     }
 
     pub fn get_output_path_for(&self, file_path: String) -> String {
-        format!("{}/{}/output/{}", self.benchmark_dir, self.current_run, file_path)
+        format!(
+            "{}/{}/output/{}",
+            self.benchmark_dir, self.current_run, file_path
+        )
     }
 
     pub fn get_result_path_for(&self, file_path: String) -> String {
-        format!("{}/{}/results/{}", self.benchmark_dir, self.current_run, file_path)
+        format!(
+            "{}/{}/results/{}",
+            self.benchmark_dir, self.current_run, file_path
+        )
     }
 
     pub fn get_current_run(benchmark_dir: String) -> usize {
@@ -303,7 +265,7 @@ impl Benchmarker {
         &mut self.workers[id] as &mut BenchmarkWorker
     }
 
-    pub fn run_benchmark(&mut self, benchmark: Arc<Mutex<dyn Benchmark>>) {
+    pub fn run_benchmark<T: Benchmark + 'static>(&mut self) {
         self.current_run = Benchmarker::get_current_run(self.benchmark_dir.clone());
         // make current run directory
         let current_run_dir = format!("{}/{}", self.benchmark_dir, self.current_run);
@@ -326,38 +288,99 @@ impl Benchmarker {
                 let path = entry.path();
                 println!("Image path: {}", path.to_str().unwrap());
 
-                worker.current_image_file_path = path.to_str().unwrap().to_string();
-                println!("Image file path: {}", worker.current_image_file_path.clone());
-                worker.current_image_name = path.file_name().unwrap().to_str().unwrap().to_string();
-                println!("Image name: {}", worker.current_image_name.clone());
+                worker.payload.as_mut().unwrap().current_image_file_path =
+                    path.to_str().unwrap().to_string();
+                println!(
+                    "Image file path: {}",
+                    worker
+                        .payload
+                        .as_ref()
+                        .unwrap()
+                        .current_image_file_path
+                        .clone()
+                );
+                worker.payload.as_mut().unwrap().current_image_name =
+                    path.file_name().unwrap().to_str().unwrap().to_string();
+                println!(
+                    "Image name: {}",
+                    worker.payload.as_ref().unwrap().current_image_name.clone()
+                );
+
                 // remove file extension
-                worker.current_image_name = worker.current_image_name.as_str().split(".").collect::<Vec<&str>>()[0].to_string();
-                println!("Image name: {}", worker.current_image_name.clone());
+                worker.payload.as_mut().unwrap().current_image_name = worker
+                    .payload
+                    .as_mut()
+                    .unwrap()
+                    .current_image_name
+                    .as_str()
+                    .split(".")
+                    .collect::<Vec<&str>>()[0]
+                    .to_string();
+                println!(
+                    "Image name: {}",
+                    worker.payload.as_ref().unwrap().current_image_name.clone()
+                );
 
-                worker.current_output_dir = output_path_for;
-                println!("Output dir: {}", worker.current_output_dir.clone());
-                worker.current_result_dir = result_path_for;
-                println!("Result dir: {}", worker.current_result_dir.clone());
-                worker.current_image_format = ImageFormat::from_file_name(&worker.current_image_file_path);
+                worker.payload.as_mut().unwrap().current_output_dir = output_path_for;
+                println!(
+                    "Output dir: {}",
+                    worker.payload.as_ref().unwrap().current_output_dir.clone()
+                );
+                worker.payload.as_mut().unwrap().current_result_dir = result_path_for;
+                println!(
+                    "Result dir: {}",
+                    worker.payload.as_ref().unwrap().current_result_dir.clone()
+                );
+                worker.payload.as_mut().unwrap().current_image_format = ImageFormat::from_file_name(
+                    &worker.payload.as_ref().unwrap().current_image_file_path,
+                );
 
-                match worker.current_image_format {
+                match worker.payload.as_ref().unwrap().current_image_format {
                     ImageFormat::Unsupported => continue,
                     _ => (),
                 }
 
-                println!("Image format: {}", worker.current_image_format.to_string());
+                println!(
+                    "Image format: {}",
+                    worker
+                        .payload
+                        .as_ref()
+                        .unwrap()
+                        .current_image_format
+                        .to_string()
+                );
 
-                if !PathBuf::from(worker.current_output_dir.clone()).exists() {
-                    println!("Creating output dir {}", worker.current_output_dir.clone());
-                    fs::create_dir_all(worker.current_output_dir.clone()).unwrap();
+                if !PathBuf::from(worker.payload.as_ref().unwrap().current_output_dir.clone())
+                    .exists()
+                {
+                    println!(
+                        "Creating output dir {}",
+                        worker.payload.as_ref().unwrap().current_output_dir.clone()
+                    );
+                    fs::create_dir_all(worker.payload.as_ref().unwrap().current_output_dir.clone())
+                        .unwrap();
                 }
-                if !PathBuf::from(worker.current_result_dir.clone()).exists() {
-                    println!("Creating result dir {}", worker.current_result_dir.clone());
-                    fs::create_dir_all(worker.current_result_dir.clone()).unwrap();
+                if !PathBuf::from(worker.payload.as_ref().unwrap().current_result_dir.clone())
+                    .exists()
+                {
+                    println!(
+                        "Creating result dir {}",
+                        worker.payload.as_ref().unwrap().current_result_dir.clone()
+                    );
+                    fs::create_dir_all(worker.payload.as_ref().unwrap().current_result_dir.clone())
+                        .unwrap();
                 }
 
-                println!("Running benchmark for image {}", worker.current_image_file_path.clone());
-                worker.run(benchmark.clone());
+                println!(
+                    "Running benchmark for image {}",
+                    worker
+                        .payload
+                        .as_ref()
+                        .unwrap()
+                        .current_image_file_path
+                        .clone()
+                );
+                worker.run::<T>();
             }
         }
     }
@@ -367,10 +390,6 @@ impl Benchmarker {
             worker.docker_manager.as_ref().unwrap().teardown().unwrap();
         }
     }
-}
-
-pub trait Benchmark: Sync + Send {
-    fn run(&mut self, payload: WorkerPayload);
 }
 
 /*pub struct CollectImageMetadataBenchmark {}
@@ -395,54 +414,12 @@ impl Benchmark for CollectImageMetadataBenchmark {
     }
 }*/
 
-pub struct JXLCompressionBenchmark<'a> {
-    benchmarker: &'a mut Benchmarker,
-    to_format: ImageFormat,
-}
-
-impl<'a> JXLCompressionBenchmark<'a> {
-    pub fn new(
-        benchmarker: &'a mut Benchmarker,
-    ) -> JXLCompressionBenchmark<'a> {
-        JXLCompressionBenchmark {
-            benchmarker,
-            to_format: ImageFormat::JpegXl,
-        }
-    }
-
-    fn execute_cjxl(
-        &mut self,
-        input_file: String,
-        output_file: String,
-        distance: f64,
-        effort: u32,
-    ) -> Result<Result<String, String>, Box<dyn Error>> {
-        let distance = format!("--distance={}", distance);
-        let effort = format!("--effort={}", effort);
-        let args = vec![
-            input_file.as_str(),
-            output_file.as_str(),
-            distance.as_str(),
-            effort.as_str(),
-        ];
-
-        self.benchmarker.get_current_worker()
-            .docker_manager.as_ref()
-            .expect("Docker manager not set")
-            .execute_in_container("../libjxl/build/tools/cjxl", args)
-    }
-
-    fn retrieve_file(&mut self, file_path: String, dest_path: String) -> Result<String, Box<dyn Error>> {
-        self.benchmarker.get_current_worker()
-            .docker_manager.as_ref()
-            .expect("Docker manager not set")
-            .retrieve_file(file_path, dest_path)
-    }
-}
-
-impl<'a> Benchmark for JXLCompressionBenchmark<'a> {
-    fn run(&mut self, payload: WorkerPayload) {
-        println!("Running Compression Benchmark for image {}", payload.current_image_name);
+impl Benchmark for JXLCompressionBenchmark {
+    fn run(docker_manager: DockerManager, payload: &WorkerPayload) {
+        println!(
+            "Running Compression Benchmark for image {}",
+            payload.current_image_name
+        );
         let out_orig_path = payload.get_output_path_for("orig".to_string());
         println!("Output orig path: {}", out_orig_path.clone());
         let out_comp_path = payload.get_output_path_for("comp".to_string());
@@ -467,13 +444,20 @@ impl<'a> Benchmark for JXLCompressionBenchmark<'a> {
         let file_path = format!(
             "{}/{}",
             payload.docker_test_image_dir,
-            payload.current_image_file_path.split(&format!("{}/", &payload.local_test_image_dir)).collect::<Vec<&str>>()[1]
+            payload
+                .current_image_file_path
+                .split(&format!("{}/", &payload.local_test_image_dir))
+                .collect::<Vec<&str>>()[1]
         );
         println!("File path: {}", file_path.clone());
 
         let image_reader = ImageReader::new(payload.current_image_file_path.clone().to_string());
         let image_file_data = image_reader.file_data;
-        let result_file = format!("{}/{}.csv", res_orig_path, payload.current_image_name.clone());
+        let result_file = format!(
+            "{}/{}.csv",
+            res_orig_path,
+            payload.current_image_name.clone()
+        );
         println!("Result file: {}", result_file.clone());
         let csv_writer = ImageFileDataCSVWriter::new();
         csv_writer.write_csv_header(&result_file).unwrap();
@@ -486,10 +470,16 @@ impl<'a> Benchmark for JXLCompressionBenchmark<'a> {
 
         for distance in distances {
             for effort in &efforts {
-                let comp_image_name = format!("{}-{}-{}.{}", payload.current_image_name, distance, effort, self.to_format.to_string());
+                let comp_image_name = format!(
+                    "{}-{}-{}.{}",
+                    payload.current_image_name,
+                    distance,
+                    effort,
+                    ImageFormat::JpegXl.to_string()
+                );
                 println!("Compressed image name: {}", comp_image_name.clone());
 
-                let result = self
+                let result = docker_manager
                     .execute_cjxl(
                         file_path.to_string(),
                         comp_image_name.clone(),
@@ -507,12 +497,16 @@ impl<'a> Benchmark for JXLCompressionBenchmark<'a> {
                         println!("Source path: {}", src_path.clone());
                         let dest_path = format!("{}/{}", out_comp_path, comp_image_name);
                         println!("Dest path: {}", dest_path.clone());
-                        self.retrieve_file(src_path, dest_path).unwrap();
+                        docker_manager.retrieve_file(src_path, dest_path).unwrap();
 
                         println!("Reading compressed image");
-                        let image_reader = ImageReader::new(format!("{}/{}", out_comp_path, comp_image_name));
+                        let image_reader =
+                            ImageReader::new(format!("{}/{}", out_comp_path, comp_image_name));
                         let image_file_data = image_reader.file_data;
-                        let result_file = format!("{}/{}-{}-{}.csv", res_comp_path, payload.current_image_name, distance, effort);
+                        let result_file = format!(
+                            "{}/{}-{}-{}.csv",
+                            res_comp_path, payload.current_image_name, distance, effort
+                        );
                         println!("Result file: {}", result_file.clone());
                         let csv_writer = ImageFileDataCSVWriter::new();
                         csv_writer.write_csv_header(&result_file).unwrap();
