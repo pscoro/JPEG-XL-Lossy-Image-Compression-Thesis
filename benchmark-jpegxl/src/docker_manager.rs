@@ -20,7 +20,7 @@ impl DockerManager {
             id,
             dockerfile: String::from(dockerfile),
             image_name: Some(String::from(DockerManager::IMAGE_NAME)),
-            container_name: Some(String::from(DockerManager::CONTAINER_NAME)),
+            container_name: Some(format!("{}-{}", String::from(DockerManager::CONTAINER_NAME), id)),
             containers: HashMap::new(),
         }
     }
@@ -111,8 +111,7 @@ impl DockerManager {
                     )?;
                 }
         */
-        let worker_container_name =
-            format!("{}-{}", self.container_name.as_ref().unwrap(), worker_id);
+        let worker_container_name = self.container_name.as_ref().unwrap();
         self.containers
             .insert(worker_id, worker_container_name.clone());
         // Start the container.
