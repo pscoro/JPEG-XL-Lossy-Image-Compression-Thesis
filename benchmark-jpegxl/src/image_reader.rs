@@ -67,22 +67,22 @@ impl ColorType {
                 Pixels::Uint8(_) => ColorType::L8,
                 Pixels::Uint16(_) => ColorType::L16,
                 _ => panic!("Unknown jxl color space"),
-            }
+            },
             2 => match pixels {
                 Pixels::Uint8(_) => ColorType::La8,
                 Pixels::Uint16(_) => ColorType::La16,
                 _ => panic!("Unknown jxl color space"),
-            }
+            },
             3 => match pixels {
                 Pixels::Uint8(_) => ColorType::Rgb8,
                 Pixels::Uint16(_) => ColorType::Rgb16,
                 _ => panic!("Unknown jxl color space"),
-            }
+            },
             4 => match pixels {
                 Pixels::Uint8(_) => ColorType::Rgba8,
                 Pixels::Uint16(_) => ColorType::Rgba16,
                 _ => panic!("Unknown jxl color space"),
-            }
+            },
             _ => todo!(),
         }
     }

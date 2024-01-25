@@ -20,11 +20,11 @@ impl Default for Config {
             application_version: "0.1.0",
             application_description: "A benchmark tool for the JPEG-XL image format",
 
-            benchmark_dir_path: "./benchmark",
+            benchmark_dir_path: "./benchmarks",
             docker_file_path: "./Dockerfile",
             local_test_image_dir_path: "./test_images",
             docker_test_image_dir_path: "/test_images",
-            
+
             use_temp_dir: false,
         }
     }

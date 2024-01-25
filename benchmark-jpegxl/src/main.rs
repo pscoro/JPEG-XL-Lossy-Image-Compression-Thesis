@@ -1,12 +1,9 @@
 use clap::Parser;
 use clap_derive::Parser;
 use std::fs;
-use std::path::PathBuf;
-use std::sync::Arc;
-use std::sync::Mutex;
 
 use benchmark_jpegxl::benchmark::{
-    Benchmarker, /*CollectImageMetadataBenchmark,*/ JXLCompressionBenchmark, Benchmark,
+    Benchmarker, /*CollectImageMetadataBenchmark,*/ JXLCompressionBenchmark,
 };
 use benchmark_jpegxl::config::Config;
 
@@ -65,25 +62,7 @@ fn main() {
     //    benchmarker.run_benchmark(&collect_image_metadata_benchmark);
 
     println!("Running JPEG-XL Compression benchmark");
-    let jpegxl_compression_benchmark = JXLCompressionBenchmark::new(&mut benchmarker);
-    let benchmark = Arc::new(Mutex::new(jpegxl_compression_benchmark));
-    benchmarker.run_benchmark(benchmark);
+    benchmarker.run_benchmark::<JXLCompressionBenchmark>();
 
     benchmarker.teardown();
-}
-
-fn all_dirs_in(path: &str) -> Vec<String> {
-    let mut test_sets = Vec::new();
-    let path = PathBuf::from(path);
-    if path.exists() {
-        for entry in fs::read_dir(path).unwrap() {
-            let entry = entry.unwrap();
-            if entry.path().is_dir() {
-                let dir_name = entry.file_name().into_string().unwrap();
-                test_sets.push(dir_name);
-            }
-        }
-    }
-    println!("Found test sets {:?}", test_sets);
-    test_sets
 }
