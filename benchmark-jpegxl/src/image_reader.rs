@@ -3,6 +3,7 @@ use serde_derive::Serialize;
 
 use image::DynamicImage;
 use std::path::Path;
+use std::fmt::{self, Display, Formatter, Debug};
 
 use jpegxl_rs::decode::{JxlDecoder, Metadata, Pixels};
 use jpegxl_rs::decoder_builder;
@@ -253,15 +254,110 @@ impl From<String> for ImageFormat {
     }
 }
 
+pub struct JXLu32(Option<u32>);
+
+impl Serialize for JXLu32 {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        match &self.0 {
+            Some(value) => serializer.serialize_u32(*value),
+            None => serializer.serialize_str(""),
+        }
+    }
+}
+
+impl Display for JXLu32 {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match &self.0 {
+            Some(value) => write!(f, "{}", value),
+            None => write!(f, ""),
+        }
+    }
+}
+
+impl Debug for JXLu32 {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match &self.0 {
+            Some(value) => write!(f, "{}", value),
+            None => write!(f, ""),
+        }
+    }
+}
+
+impl JXLu32 {
+    pub fn new(value: Option<u32>) -> JXLu32 {
+        JXLu32(value)
+    }
+
+    pub fn to_string(&self) -> String {
+        match self.0 {
+            Some(value) => value.to_string(),
+            None => "".to_string(),
+        }
+    }
+}
+
+pub struct JXLString(Option<String>);
+
+impl JXLString {
+    pub fn new(value: Option<String>) -> JXLString {
+        JXLString(value)
+    }
+
+    pub fn to_string(&self) -> String {
+        match &self.0 {
+            Some(value) => value.clone(),
+            None => "".to_string(),
+        }
+    }
+}
+
+impl Serialize for JXLString {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        match &self.0 {
+            Some(value) => serializer.serialize_str(value),
+            None => serializer.serialize_str(""),
+        }
+    }
+}
+
+impl Display for JXLString {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match &self.0 {
+            Some(value) => write!(f, "{}", value),
+            None => write!(f, ""),
+        }
+    }
+}
+
+impl Debug for JXLString {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match &self.0 {
+            Some(value) => write!(f, "{}", value),
+            None => write!(f, ""),
+        }
+    }
+}
+
 #[derive(Debug, Serialize)]
 pub struct ImageFileData {
+    pub image_name: String,
+    pub test_set: String,
     pub file_path: String,
     pub width: u32,
     pub height: u32,
     pub file_size: usize,
     pub raw_size: usize,
-    pub file_format: ImageFormat,
     pub color_space: ColorType,
+    pub file_format: ImageFormat,
+    pub jxl_orig_image_name: JXLString,
+    pub jxl_distance: JXLu32,
+    pub jxl_effort: JXLu32,
 }
 
 pub struct ImageReader {
@@ -274,6 +370,7 @@ impl ImageReader {
         println!("Reading image from {}", file_path);
         let path = Path::new(&file_path);
         let extension = path.extension().unwrap().to_str().unwrap();
+        println!("Extension: {}", extension);
         if extension == "jxl" {
             return ImageReader::read_jxl(file_path);
         }
@@ -282,13 +379,18 @@ impl ImageReader {
         ImageReader {
             image: Some(image.clone()),
             file_data: ImageFileData {
+                image_name: path.file_name().unwrap().to_str().unwrap().to_string(),
+                test_set: path.parent().unwrap().file_name().unwrap().to_str().unwrap().to_string(),
                 file_path: file_path.clone(),
                 width: image.width(),
                 height: image.height(),
                 file_size: ImageReader::get_file_size(&file_path),
                 raw_size: ImageReader::get_raw_size(&file_path),
-                file_format: ImageReader::get_format(&file_path),
                 color_space: image.color().into(),
+                file_format: ImageReader::get_format(&file_path),
+                jxl_orig_image_name: JXLString::new(None),
+                jxl_distance: JXLu32::new(None),
+                jxl_effort: JXLu32::new(None),
             },
         }
     }
@@ -297,16 +399,57 @@ impl ImageReader {
         let sample = std::fs::read(file_path.clone()).unwrap();
         let decoder: JxlDecoder = decoder_builder().build().unwrap();
         let (metadata, pixels) = decoder.decode(&sample).unwrap();
+        // file_path: .../<test_set>/<orig_image_name>-<distance>-<effort>.jxl
+        let path = Path::new(&file_path);
+        let file_name = path.file_name().unwrap().to_str().unwrap().to_string();
+        let extension = path.extension().unwrap().to_str().unwrap();
+        let file_name_parts: Vec<&str> = file_name.split("-").collect();
+        let orig_image_name = file_name_parts[0..file_name_parts.len() - 2].join("-");
+
+        let distance = file_name_parts[file_name_parts.len() - 2].parse::<u32>();
+        let distance = match extension {
+            "jxl" => match distance {
+                Ok(value) => JXLu32::new(Some(value)),
+                Err(_) => JXLu32::new(None),
+            },
+            _ => JXLu32::new(None),
+        };
+
+        let effort = file_name_parts.last().unwrap().split(".").next().unwrap().parse::<u32>();
+        let effort = match extension {
+            "jxl" => match effort {
+                Ok(value) => JXLu32::new(Some(value)),
+                Err(_) => JXLu32::new(None),
+            },
+            _ => JXLu32::new(None),
+        };
+
+        if extension != "jxl" {
+            panic!("Not a .jxl file");
+        }
+
         ImageReader {
             image: None,
             file_data: ImageFileData {
+                image_name: file_name.clone(),
+                test_set: Path::new(&file_path)
+                    .parent()
+                    .unwrap()
+                    .file_name()
+                    .unwrap()
+                    .to_str()
+                    .unwrap()
+                    .to_string(),
                 file_path: file_path.clone(),
                 width: metadata.width.clone(),
                 height: metadata.height.clone(),
                 file_size: ImageReader::get_file_size(&file_path),
-                raw_size: ImageReader::get_raw_size(&file_path),
-                file_format: ImageReader::get_format(&file_path),
+                raw_size: ImageReader::get_raw_jxl_size(&file_path),
                 color_space: ColorType::get_jxl_color_space(&metadata, &pixels),
+                file_format: ImageReader::get_format(&file_path),
+                jxl_orig_image_name: JXLString::new(Some(orig_image_name)),
+                jxl_distance: distance,
+                jxl_effort: effort,
             },
         }
     }
@@ -340,6 +483,28 @@ impl ImageReader {
         size as usize
     }
 
+    fn get_raw_jxl_size(file_path: &String) -> usize {
+        let sample = std::fs::read(file_path.clone()).unwrap();
+        let decoder: JxlDecoder = decoder_builder().build().unwrap();
+        let (metadata, pixels) = decoder.decode(&sample).unwrap();
+        let width = metadata.width;
+        let height = metadata.height;
+        let bytes_per_pixel = match ColorType::get_jxl_color_space(&metadata, &pixels) {
+            ColorType::L8 => 1,
+            ColorType::La8 => 2,
+            ColorType::Rgb8 => 3,
+            ColorType::Rgba8 => 4,
+            ColorType::L16 => 2,
+            ColorType::La16 => 4,
+            ColorType::Rgb16 => 6,
+            ColorType::Rgba16 => 8,
+            ColorType::Rgb32F => 12,
+            ColorType::Rgba32F => 16,
+        };
+        let size = width * height * bytes_per_pixel;
+        size as usize
+    }
+
     fn get_raw_size(file_path: &String) -> usize {
         let image = image::open(&file_path).unwrap();
         let color_space = image.color();
@@ -356,7 +521,7 @@ impl ImageReader {
             image::ColorType::Rgba16 => 8,
             image::ColorType::Rgb32F => 12,
             image::ColorType::Rgba32F => 16,
-            _ => todo!(),
+            _ => panic!("Unsupported color space"),
         };
         let size = width * height * bytes_per_pixel;
         size as usize

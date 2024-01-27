@@ -64,5 +64,13 @@ fn main() {
     println!("Running JPEG-XL Compression benchmark");
     benchmarker.run_benchmark::<JXLCompressionBenchmark>();
 
+    for worker in &mut benchmarker.workers {
+        println!("Waiting for worker {} to finish", worker.id);
+        if let Some(thread_handle) = worker.thread_handle.take() {
+            thread_handle.join().unwrap();
+        } else {
+            panic!("Worker {} has no thread handle", worker.id);
+        }
+    }
     benchmarker.teardown();
 }

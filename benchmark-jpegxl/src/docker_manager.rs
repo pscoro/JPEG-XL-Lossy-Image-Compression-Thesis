@@ -77,11 +77,11 @@ impl DockerManager {
     /// # Returns
     /// * `Result<(), Error>` - An error if the setup fails.
     pub fn setup(&mut self, worker_id: usize) -> Result<(), Box<dyn Error>> {
-        println!("Setting up docker container...");
+        println!("Setting up docker container for worker {}...", worker_id);
 
-        // Create the container.
-        println!("Creating docker container...");
-        self.execute_command(
+        // Build the docker image.
+        println!("Building docker image...");
+        match self.execute_command(
             Command::new("docker")
                 .arg("build")
                 .arg("-t")
@@ -89,7 +89,12 @@ impl DockerManager {
                 .arg("-f")
                 .arg(self.dockerfile.as_str())
                 .arg("."),
-        )?;
+        ) {
+            Ok(_) => {}
+            Err(_) => {
+                println!("Error building docker image");
+            }
+        }
 
         // Check if container is running.
         /*        // If it is, stop it.
@@ -115,7 +120,7 @@ impl DockerManager {
         self.containers
             .insert(worker_id, worker_container_name.clone());
         // Start the container.
-        println!("Starting docker container...");
+        println!("Starting docker container... {}", worker_container_name.clone());
         self.execute_command(
             Command::new("docker")
                 .arg("run")
