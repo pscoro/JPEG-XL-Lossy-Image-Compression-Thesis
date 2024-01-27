@@ -8,7 +8,7 @@ use std::fmt::{self, Display, Formatter, Debug};
 use jpegxl_rs::decode::{JxlDecoder, Metadata, Pixels};
 use jpegxl_rs::decoder_builder;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum ColorType {
     L8,
     La8,
@@ -28,6 +28,24 @@ impl Serialize for ColorType {
         S: Serializer,
     {
         serializer.serialize_str(&self.to_string())
+    }
+}
+
+impl From<String> for ColorType {
+    fn from(color_type: String) -> Self {
+        match color_type.as_str() {
+            "L8" => ColorType::L8,
+            "La8" => ColorType::La8,
+            "Rgb8" => ColorType::Rgb8,
+            "Rgba8" => ColorType::Rgba8,
+            "L16" => ColorType::L16,
+            "La16" => ColorType::La16,
+            "Rgb16" => ColorType::Rgb16,
+            "Rgba16" => ColorType::Rgba16,
+            "Rgb32F" => ColorType::Rgb32F,
+            "Rgba32F" => ColorType::Rgba32F,
+            _ => todo!(),
+        }
     }
 }
 
@@ -254,7 +272,24 @@ impl From<String> for ImageFormat {
     }
 }
 
+#[derive(Clone)]
 pub struct JXLu32(Option<u32>);
+
+impl From<u32> for JXLu32 {
+    fn from(value: u32) -> Self {
+        JXLu32(Some(value))
+    }
+}
+
+impl From<String> for JXLu32 {
+    fn from(value: String) -> Self {
+        if value.is_empty() {
+            JXLu32(None)
+        } else {
+            JXLu32(Some(value.parse::<u32>().unwrap()))
+        }
+    }
+}
 
 impl Serialize for JXLu32 {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
@@ -299,6 +334,7 @@ impl JXLu32 {
     }
 }
 
+#[derive(Clone)]
 pub struct JXLString(Option<String>);
 
 impl JXLString {
@@ -310,6 +346,16 @@ impl JXLString {
         match &self.0 {
             Some(value) => value.clone(),
             None => "".to_string(),
+        }
+    }
+}
+
+impl From<String> for JXLString {
+    fn from(value: String) -> Self {
+        if value.is_empty() {
+            JXLString(None)
+        } else {
+            JXLString(Some(value))
         }
     }
 }
@@ -344,7 +390,7 @@ impl Debug for JXLString {
     }
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct ImageFileData {
     pub image_name: String,
     pub test_set: String,
@@ -525,5 +571,58 @@ impl ImageReader {
         };
         let size = width * height * bytes_per_pixel;
         size as usize
+    }
+
+    pub fn calculate_mse(orig_image_path: &String, comp_image_path: &String) -> f64 {
+        let orig_image = image::open(orig_image_path).unwrap();
+        let decoder: JxlDecoder = decoder_builder().build().unwrap();
+        let comp_image = std::fs::read(comp_image_path.clone()).unwrap();
+        let (comp_metadata, comp_pixels) = decoder.decode(&comp_image).unwrap();
+//        let orig_image = match ColorType::get_jxl_color_space(&comp_metadata, &comp_pixels) {
+//            ColorType::L8 => orig_image.to_luma8(),
+//            ColorType::La8 => orig_image.to_luma_alpha8(),
+//            ColorType::Rgb8 => orig_image.to_rgb8(),
+//            ColorType::Rgba8 => orig_image.to_rgba8(),
+//            ColorType::L16 => orig_image.to_luma16(),
+//            ColorType::La16 => orig_image.to_luma_alpha16(),
+//            ColorType::Rgb16 => orig_image.to_rgb16(),
+//            ColorType::Rgba16 => orig_image.to_rgba16(),
+//            ColorType::Rgb32F => orig_image.to_rgb32f(),
+//            ColorType::Rgba32F => orig_image.to_rgba32f(),
+//        };
+        let orig_image = match ColorType::get_jxl_color_space(&comp_metadata, &comp_pixels) {
+            ColorType::Rgb8 => orig_image.to_rgb8(),
+            _ => todo!(),
+        };
+        let orig_image = orig_image.as_flat_samples();
+        let mut mse = 0.0;
+        match comp_pixels {
+            Pixels::Uint8(comp_pixels) => {
+                for i in 0..orig_image.samples.len() {
+                    mse += (orig_image.samples[i] as f64 - comp_pixels[i] as f64).powi(2);
+                }
+            }
+            Pixels::Uint16(comp_pixels) => {
+                for i in 0..orig_image.samples.len() {
+                    mse += (orig_image.samples[i] as f64 - comp_pixels[i] as f64).powi(2);
+                }
+            }
+            Pixels::Float(comp_pixels) => {
+                for i in 0..orig_image.samples.len() {
+                    mse += (orig_image.samples[i] as f64 - comp_pixels[i] as f64).powi(2);
+                }
+            }
+            Pixels::Float16(comp_pixels) => {
+                for i in 0..orig_image.samples.len() {
+                    mse += (orig_image.samples[i] as f64 - f64::from(comp_pixels[i])).powi(2);
+                }
+            }
+        }
+        mse /= orig_image.samples.len() as f64;
+        mse
+    }
+
+    pub fn calculate_psnr(mse: f64, max_value: f64) -> f64 {
+        10.0 * ((max_value * max_value) / mse).log10()
     }
 }

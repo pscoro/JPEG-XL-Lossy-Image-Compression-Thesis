@@ -1,8 +1,9 @@
 use crate::config::Config;
-use crate::csv_writer::CSVWriter;
-use crate::csv_writer::ImageFileDataCSVWriter;
+use crate::csv_writer::{
+    ComparisonResult, ComparisonResultCSVWriter, ImageFileDataCSVWriter, CSVWriter, CSVReader,
+};
 use crate::docker_manager::DockerManager;
-use crate::image_reader::{ImageFormat, ImageReader};
+use crate::image_reader::{ImageFormat, ImageReader, ImageFileData};
 
 use std::fs;
 use std::path::PathBuf;
@@ -516,8 +517,15 @@ impl Benchmark for JXLCompressionBenchmark {
                         let csv_writer = ImageFileDataCSVWriter::new();
                         csv_writer.write_csv_header(&result_file).unwrap();
                         csv_writer
-                            .write_csv(&vec![image_file_data], &result_file)
+                            .write_csv(&vec![image_file_data.clone()], &result_file)
                             .unwrap();
+
+                        println!("Comparing images");
+                        JXLCompressionBenchmark::compare_images(
+                            &image_file_data,
+                            &res_orig_path,
+                            &res_comp_path,
+                        );
                     }
                     Err(error) => {
                         println!("Error: {}", error);
@@ -525,5 +533,63 @@ impl Benchmark for JXLCompressionBenchmark {
                 }
             }
         }
+    }
+}
+
+impl JXLCompressionBenchmark {
+    fn compare_images(comp_image_data: &ImageFileData, orig_path: &str, comp_path: &str) {
+        let csv_writer = ImageFileDataCSVWriter::new();
+        let orig_entry = csv_writer
+            .find_entry(format!("{}/results.csv", orig_path).as_str(), 0, format!("{}.png", &comp_image_data.jxl_orig_image_name).as_str())
+            .unwrap();
+        println!("Comparing {} to {}", comp_image_data.image_name, orig_entry.image_name);
+
+        // Comparison calculations
+        // Original file size to compressed file size ratio
+        let orig_file_size = orig_entry.file_size as f64;
+        let comp_file_size = comp_image_data.file_size as f64;
+        let file_size_ratio = orig_file_size / comp_file_size;
+
+        // Raw image size to compressed file size ratio
+        let orig_raw_size = orig_entry.raw_size as f64;
+        let comp_file_size = comp_image_data.file_size as f64;
+        let raw_size_ratio = orig_raw_size / comp_file_size;
+
+        // MSE
+        let orig_image_path = orig_entry.file_path.clone();
+        let comp_image_path = comp_image_data.file_path.clone();
+        let mse = ImageReader::calculate_mse(&orig_image_path, &comp_image_path);
+
+        // PSNR
+        let psnr = ImageReader::calculate_psnr(mse, 255.0);
+
+        // SSIM
+        // MS-SSIM
+        
+        let comparison_result = ComparisonResult {
+            orig_image_name: orig_entry.image_name.clone(),
+            comp_image_name: comp_image_data.image_name.clone(),
+            orig_file_size: orig_entry.file_size as u64,
+            comp_file_size: comp_image_data.file_size as u64,
+            orig_raw_size: orig_entry.raw_size as u64,
+            comp_raw_size: comp_image_data.raw_size as u64,
+            file_size_ratio,
+            raw_size_ratio,
+            mse,
+            psnr,
+            ssim: 0.0,
+            ms_ssim: 0.0,
+        };
+
+        let result_file = format!(
+            "{}/comparisons.csv",
+            comp_path,
+        );
+
+        let csv_writer = ComparisonResultCSVWriter::new();
+        csv_writer.write_csv_header(&result_file).unwrap();
+        csv_writer
+            .write_csv(&vec![comparison_result], &result_file)
+            .unwrap();
     }
 }
