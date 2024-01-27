@@ -73,6 +73,7 @@ impl BenchmarkWorker {
     }
 
     pub fn run<T: Benchmark + 'static>(&mut self) {
+        println!("Running worker {}", self.id);
         let payload = self.payload.as_ref().unwrap().clone();
         if self.thread_handle.is_some() {
             self.thread_handle.take().unwrap().join().unwrap();
@@ -81,6 +82,7 @@ impl BenchmarkWorker {
         self.thread_handle = Some(std::thread::spawn(move || {
             T::run(docker, &payload);
         }));
+        println!("Thread spawned");
     }
 }
 
@@ -240,15 +242,18 @@ impl Benchmarker {
     pub fn get_all_test_set_names(local_test_image_dir: String) -> Vec<String> {
         let mut test_sets = Vec::new();
         let path = PathBuf::from(local_test_image_dir.clone());
+        println!("Local test image dir: {}", local_test_image_dir.clone());
         if path.exists() {
             for entry in fs::read_dir(path).unwrap() {
                 let entry = entry.unwrap();
                 let path = entry.path();
                 let test_set_dir_name = path.file_name().unwrap().to_str().unwrap();
+                println!("Test set dir name: {}", test_set_dir_name);
                 // if test_set_dir_name starts with a "." or is not a directory, skip it
                 if test_set_dir_name.starts_with(".") || !path.is_dir() {
                     continue;
                 }
+                println!("Found test set {}", test_set_dir_name);
                 test_sets.push(test_set_dir_name.to_string());
             }
         }
@@ -266,6 +271,7 @@ impl Benchmarker {
     }
 
     pub fn run_benchmark<T: Benchmark + 'static>(&mut self) {
+        println!("Running benchmark");
         self.current_run = Benchmarker::get_current_run(self.benchmark_dir.clone());
         // make current run directory
         let current_run_dir = format!("{}/{}", self.benchmark_dir, self.current_run);
@@ -454,9 +460,8 @@ impl Benchmark for JXLCompressionBenchmark {
         let image_reader = ImageReader::new(payload.current_image_file_path.clone().to_string());
         let image_file_data = image_reader.file_data;
         let result_file = format!(
-            "{}/{}.csv",
+            "{}/results.csv",
             res_orig_path,
-            payload.current_image_name.clone()
         );
         println!("Result file: {}", result_file.clone());
         let csv_writer = ImageFileDataCSVWriter::new();
@@ -504,8 +509,8 @@ impl Benchmark for JXLCompressionBenchmark {
                             ImageReader::new(format!("{}/{}", out_comp_path, comp_image_name));
                         let image_file_data = image_reader.file_data;
                         let result_file = format!(
-                            "{}/{}-{}-{}.csv",
-                            res_comp_path, payload.current_image_name, distance, effort
+                            "{}/results.csv",
+                            res_comp_path,
                         );
                         println!("Result file: {}", result_file.clone());
                         let csv_writer = ImageFileDataCSVWriter::new();

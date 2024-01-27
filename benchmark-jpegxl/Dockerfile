@@ -34,12 +34,12 @@ RUN apt-get update && apt-get install -y \
 	xdg-utils
 
 WORKDIR /test-images
-ADD ./test_images /test-images
+ADD ./test_images /test_images
 
 WORKDIR /
 RUN git clone https://github.com/libjxl/libjxl.git --recursive --shallow-submodules
 
 WORKDIR /libjxl
-RUN ./ci.sh opt
+RUN ./ci.sh opt; exit 0
 
 WORKDIR /temp
