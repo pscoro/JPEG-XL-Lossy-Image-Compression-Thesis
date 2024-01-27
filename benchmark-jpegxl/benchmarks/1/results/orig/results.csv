@@ -1,9 +1,0 @@
-Image Name,Test Set,File Path,Image Width,Image Height,File Size,Raw Image Size,Image Color Space,File Format,JXL Distance,JXL Effort
-joeri-romer-169.png,test_dataset_P,./test_images/test_dataset_P/joeri-romer-169.png,960,640,958801,1843200,Rgb8,png,,,
-simon-pape-187.png,test_dataset_P,./test_images/test_dataset_P/simon-pape-187.png,1024,637,793105,1956864,Rgb8,png,,,
-antonina-bukowska-140309.png,test_dataset_P,./test_images/test_dataset_P/antonina-bukowska-140309.png,1500,1000,2758250,4500000,Rgb8,png,,,
-vladimir-chuchadeev-86192.png,test_dataset_P,./test_images/test_dataset_P/vladimir-chuchadeev-86192.png,1846,1231,4304332,6817278,Rgb8,png,,,
-rachel-davis-50329.png,test_dataset_P,./test_images/test_dataset_P/rachel-davis-50329.png,2048,1367,4365429,8398848,Rgb8,png,,,
-redd-angelo-100616.png,test_dataset_P,./test_images/test_dataset_P/redd-angelo-100616.png,1365,2048,3799257,8386560,Rgb8,png,,,
-jeff-sheldon-2556.png,test_dataset_P,./test_images/test_dataset_P/jeff-sheldon-2556.png,2048,1536,4037441,9437184,Rgb8,png,,,
-milada-vigerova-7276.png,test_dataset_P,./test_images/test_dataset_P/milada-vigerova-7276.png,1824,1921,5427200,10511712,Rgb8,png,,,
