@@ -61,6 +61,22 @@ impl DockerManager {
         distance: f64,
         effort: u32,
     ) -> Result<Result<String, String>, Box<dyn Error>> {
+        _ = self.execute_in_container(
+            "mkdir",
+            vec![
+                "-p",
+                format!(
+                    "{}",
+                    output_file
+                        .clone()
+                        .split("/")
+                        .take(output_file.split("/").count() - 1)
+                        .collect::<Vec<&str>>()
+                        .join("/")
+                )
+                .as_str(),
+            ],
+        )?;
         let distance = format!("--distance={}", distance);
         let effort = format!("--effort={}", effort);
         let args = vec![

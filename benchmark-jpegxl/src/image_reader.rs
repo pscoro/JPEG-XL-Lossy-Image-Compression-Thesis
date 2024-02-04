@@ -271,9 +271,88 @@ impl From<String> for ImageFormat {
         }
     }
 }
+#[derive(Clone, Copy)]
+pub struct JXLf32(Option<f32>);
 
-#[derive(Clone)]
+impl From<JXLf32> for f32 {
+    fn from(value: JXLf32) -> Self {
+        match value.0 {
+            Some(value) => value,
+            None => 0.0,
+        }
+    }
+}
+
+impl From<f32> for JXLf32 {
+    fn from(value: f32) -> Self {
+        JXLf32(Some(value))
+    }
+}
+
+impl From<String> for JXLf32 {
+    fn from(value: String) -> Self {
+        if value.is_empty() {
+            JXLf32(None)
+        } else {
+            JXLf32(Some(value.parse::<f32>().unwrap()))
+        }
+    }
+}
+
+impl Serialize for JXLf32 {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        match &self.0 {
+            Some(value) => serializer.serialize_f32(*value),
+            None => serializer.serialize_str(""),
+        }
+    }
+}
+
+impl Display for JXLf32 {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match &self.0 {
+            Some(value) => write!(f, "{}", value),
+            None => write!(f, ""),
+        }
+    }
+}
+
+impl Debug for JXLf32 {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match &self.0 {
+            Some(value) => write!(f, "{}", value),
+            None => write!(f, ""),
+        }
+    }
+}
+
+impl JXLf32 {
+    pub fn new(value: Option<f32>) -> JXLf32 {
+        JXLf32(value)
+    }
+
+    pub fn to_string(&self) -> String {
+        match self.0 {
+            Some(value) => value.to_string(),
+            None => "".to_string(),
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
 pub struct JXLu32(Option<u32>);
+
+impl From<JXLu32> for u32 {
+    fn from(value: JXLu32) -> Self {
+        match value.0 {
+            Some(value) => value,
+            None => 0,
+        }
+    }
+}
 
 impl From<u32> for JXLu32 {
     fn from(value: u32) -> Self {
@@ -402,7 +481,7 @@ pub struct ImageFileData {
     pub color_space: ColorType,
     pub file_format: ImageFormat,
     pub jxl_orig_image_name: JXLString,
-    pub jxl_distance: JXLu32,
+    pub jxl_distance: JXLf32,
     pub jxl_effort: JXLu32,
 }
 
@@ -435,7 +514,7 @@ impl ImageReader {
                 color_space: image.color().into(),
                 file_format: ImageReader::get_format(&file_path),
                 jxl_orig_image_name: JXLString::new(None),
-                jxl_distance: JXLu32::new(None),
+                jxl_distance: JXLf32::new(None),
                 jxl_effort: JXLu32::new(None),
             },
         }
@@ -452,13 +531,13 @@ impl ImageReader {
         let file_name_parts: Vec<&str> = file_name.split("-").collect();
         let orig_image_name = file_name_parts[0..file_name_parts.len() - 2].join("-");
 
-        let distance = file_name_parts[file_name_parts.len() - 2].parse::<u32>();
+        let distance = file_name_parts[file_name_parts.len() - 2].parse::<f32>();
         let distance = match extension {
             "jxl" => match distance {
-                Ok(value) => JXLu32::new(Some(value)),
-                Err(_) => JXLu32::new(None),
+                Ok(value) => JXLf32::new(Some(value)),
+                Err(_) => JXLf32::new(None),
             },
-            _ => JXLu32::new(None),
+            _ => JXLf32::new(None),
         };
 
         let effort = file_name_parts.last().unwrap().split(".").next().unwrap().parse::<u32>();

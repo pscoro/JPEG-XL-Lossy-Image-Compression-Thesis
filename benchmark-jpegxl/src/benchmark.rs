@@ -473,11 +473,21 @@ impl Benchmark for JXLCompressionBenchmark {
 
         let distances = vec![0.0, 0.5, 1.0, 2.0, 3.0, 5.0, 10.0, 15.0, 25.0];
         let efforts = (1..=9).collect::<Vec<u32>>();
+        let test_set = payload.current_image_file_path.split("/").collect::<Vec<&str>>()[2];
+        let out_test_set_path = format!("{}/{}", out_comp_path, test_set);
+        if !PathBuf::from(out_test_set_path.clone()).exists() {
+            fs::create_dir_all(out_test_set_path.clone()).unwrap();
+        }
+        let res_test_set_path = format!("{}/{}", out_comp_path, test_set);
+        if !PathBuf::from(res_test_set_path.clone()).exists() {
+            fs::create_dir_all(res_test_set_path.clone()).unwrap();
+        }
 
         for distance in distances {
             for effort in &efforts {
                 let comp_image_name = format!(
-                    "{}-{}-{}.{}",
+                    "{}/{}-{}-{}.{}",
+                    test_set,
                     payload.current_image_name,
                     distance,
                     effort,
@@ -569,6 +579,8 @@ impl JXLCompressionBenchmark {
         let comparison_result = ComparisonResult {
             orig_image_name: orig_entry.image_name.clone(),
             comp_image_name: comp_image_data.image_name.clone(),
+            distance: comp_image_data.jxl_distance.into(),
+            effort: comp_image_data.jxl_effort.into(),
             orig_file_size: orig_entry.file_size as u64,
             comp_file_size: comp_image_data.file_size as u64,
             orig_raw_size: orig_entry.raw_size as u64,

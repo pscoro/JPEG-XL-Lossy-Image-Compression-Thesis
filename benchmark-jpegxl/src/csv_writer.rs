@@ -24,6 +24,8 @@ where
 pub struct ComparisonResult {
     pub orig_image_name: String,
     pub comp_image_name: String,
+    pub distance: f32,
+    pub effort: u32,
     pub orig_file_size: u64,
     pub comp_file_size: u64,
     pub orig_raw_size: u64,
@@ -53,6 +55,8 @@ impl CSVWriter<ComparisonResult> for ComparisonResultCSVWriter {
             wtr.write_record(&[
                 &record.orig_image_name,
                 &record.comp_image_name,
+                &record.distance.to_string(),
+                &record.effort.to_string(),
                 &record.orig_file_size.to_string(),
                 &record.comp_file_size.to_string(),
                 &record.orig_raw_size.to_string(),
@@ -86,6 +90,8 @@ impl CSVWriter<ComparisonResult> for ComparisonResultCSVWriter {
         wtr.write_record(&[
             "Original Image Name",
             "Compressed Image Name",
+            "Distance",
+            "Effort",
             "Original File Size",
             "Compressed File Size",
             "Original Raw Size",
@@ -128,7 +134,7 @@ impl CSVReader<ImageFileData> for ImageFileDataCSVWriter {
                 color_space: record[7].to_string().into(),
                 file_format: record[8].to_string().into(),
                 jxl_orig_image_name: record[9].to_string().into(),
-                jxl_distance: record[10].parse::<u32>().unwrap().into(),
+                jxl_distance: record[10].parse::<f32>().unwrap().into(),
                 jxl_effort: record[11].parse::<u32>().unwrap().into(),
             };
             data.push(image_file_data);
