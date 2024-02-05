@@ -2,8 +2,8 @@ use serde::{Serialize, Serializer};
 use serde_derive::Serialize;
 
 use image::DynamicImage;
+use std::fmt::{self, Debug, Display, Formatter};
 use std::path::Path;
-use std::fmt::{self, Display, Formatter, Debug};
 
 use jpegxl_rs::decode::{JxlDecoder, Metadata, Pixels};
 use jpegxl_rs::decoder_builder;
@@ -505,7 +505,14 @@ impl ImageReader {
             image: Some(image.clone()),
             file_data: ImageFileData {
                 image_name: path.file_name().unwrap().to_str().unwrap().to_string(),
-                test_set: path.parent().unwrap().file_name().unwrap().to_str().unwrap().to_string(),
+                test_set: path
+                    .parent()
+                    .unwrap()
+                    .file_name()
+                    .unwrap()
+                    .to_str()
+                    .unwrap()
+                    .to_string(),
                 file_path: file_path.clone(),
                 width: image.width(),
                 height: image.height(),
@@ -540,7 +547,13 @@ impl ImageReader {
             _ => JXLf32::new(None),
         };
 
-        let effort = file_name_parts.last().unwrap().split(".").next().unwrap().parse::<u32>();
+        let effort = file_name_parts
+            .last()
+            .unwrap()
+            .split(".")
+            .next()
+            .unwrap()
+            .parse::<u32>();
         let effort = match extension {
             "jxl" => match effort {
                 Ok(value) => JXLu32::new(Some(value)),
@@ -657,18 +670,18 @@ impl ImageReader {
         let decoder: JxlDecoder = decoder_builder().build().unwrap();
         let comp_image = std::fs::read(comp_image_path.clone()).unwrap();
         let (comp_metadata, comp_pixels) = decoder.decode(&comp_image).unwrap();
-//        let orig_image = match ColorType::get_jxl_color_space(&comp_metadata, &comp_pixels) {
-//            ColorType::L8 => orig_image.to_luma8(),
-//            ColorType::La8 => orig_image.to_luma_alpha8(),
-//            ColorType::Rgb8 => orig_image.to_rgb8(),
-//            ColorType::Rgba8 => orig_image.to_rgba8(),
-//            ColorType::L16 => orig_image.to_luma16(),
-//            ColorType::La16 => orig_image.to_luma_alpha16(),
-//            ColorType::Rgb16 => orig_image.to_rgb16(),
-//            ColorType::Rgba16 => orig_image.to_rgba16(),
-//            ColorType::Rgb32F => orig_image.to_rgb32f(),
-//            ColorType::Rgba32F => orig_image.to_rgba32f(),
-//        };
+        //        let orig_image = match ColorType::get_jxl_color_space(&comp_metadata, &comp_pixels) {
+        //            ColorType::L8 => orig_image.to_luma8(),
+        //            ColorType::La8 => orig_image.to_luma_alpha8(),
+        //            ColorType::Rgb8 => orig_image.to_rgb8(),
+        //            ColorType::Rgba8 => orig_image.to_rgba8(),
+        //            ColorType::L16 => orig_image.to_luma16(),
+        //            ColorType::La16 => orig_image.to_luma_alpha16(),
+        //            ColorType::Rgb16 => orig_image.to_rgb16(),
+        //            ColorType::Rgba16 => orig_image.to_rgba16(),
+        //            ColorType::Rgb32F => orig_image.to_rgb32f(),
+        //            ColorType::Rgba32F => orig_image.to_rgba32f(),
+        //        };
         let orig_image = match ColorType::get_jxl_color_space(&comp_metadata, &comp_pixels) {
             ColorType::Rgb8 => orig_image.to_rgb8(),
             _ => todo!(),

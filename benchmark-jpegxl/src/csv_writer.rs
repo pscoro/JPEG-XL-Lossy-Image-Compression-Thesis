@@ -36,6 +36,9 @@ pub struct ComparisonResult {
     pub psnr: f64,
     pub ssim: f64,
     pub ms_ssim: f64,
+    pub butteraugli: f64,
+    pub butteraugli_pnorm: f64,
+    pub ssimulacra2: f64,
 }
 
 pub struct ComparisonResultCSVWriter {}
@@ -47,7 +50,11 @@ impl ComparisonResultCSVWriter {
 }
 
 impl CSVWriter<ComparisonResult> for ComparisonResultCSVWriter {
-    fn write_csv(&self, data: &Vec<ComparisonResult>, file_name: &str) -> Result<(), Box<dyn Error>> {
+    fn write_csv(
+        &self,
+        data: &Vec<ComparisonResult>,
+        file_name: &str,
+    ) -> Result<(), Box<dyn Error>> {
         println!("Writing {} records to {}", data.len(), file_name);
         let file = OpenOptions::new().append(true).open(file_name)?;
         let mut wtr = csv::Writer::from_writer(file);
@@ -67,6 +74,9 @@ impl CSVWriter<ComparisonResult> for ComparisonResultCSVWriter {
                 &record.psnr.to_string(),
                 &record.ssim.to_string(),
                 &record.ms_ssim.to_string(),
+                &record.butteraugli.to_string(),
+                &record.butteraugli_pnorm.to_string(),
+                &record.ssimulacra2.to_string(),
             ])?;
         }
         wtr.flush()?;
@@ -101,7 +111,10 @@ impl CSVWriter<ComparisonResult> for ComparisonResultCSVWriter {
             "MSE",
             "PSNR",
             "SSIM",
-            "MSSSIM",
+            "MS-SSIM",
+            "Butteraugli",
+            "Butteraugli 3-Norm", // TODO: Support for multiple butteraugli p-norms?
+            "SSIMULACRA2",
         ])?;
         wtr.flush()?;
         Ok(())
@@ -120,7 +133,11 @@ impl CSVReader<ImageFileData> for ImageFileDataCSVWriter {
     fn read_csv(&self, file_name: &str) -> Result<Vec<ImageFileData>, Box<dyn Error>> {
         let mut rdr = csv::Reader::from_path(file_name)?;
         let mut data = Vec::new();
-        println!("Reading {} records from {}", rdr.records().count(), file_name);
+        println!(
+            "Reading {} records from {}",
+            rdr.records().count(),
+            file_name
+        );
         for result in rdr.records() {
             let record = result?;
             let image_file_data = ImageFileData {
@@ -169,7 +186,12 @@ impl CSVReader<ImageFileData> for ImageFileDataCSVWriter {
         Ok(data[entry].clone())
     }
 
-    fn find_entry(&self, file_name: &str, column: usize, value: &str) -> Result<ImageFileData, Box<dyn Error>> {
+    fn find_entry(
+        &self,
+        file_name: &str,
+        column: usize,
+        value: &str,
+    ) -> Result<ImageFileData, Box<dyn Error>> {
         let mut rdr = csv::Reader::from_path(file_name)?;
         for result in rdr.records() {
             let record = result?;

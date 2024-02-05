@@ -1,12 +1,14 @@
 use crate::config::Config;
 use crate::csv_writer::{
-    ComparisonResult, ComparisonResultCSVWriter, ImageFileDataCSVWriter, CSVWriter, CSVReader,
+    CSVReader, CSVWriter, ComparisonResult, ComparisonResultCSVWriter, ImageFileDataCSVWriter,
 };
 use crate::docker_manager::DockerManager;
-use crate::image_reader::{ImageFormat, ImageReader, ImageFileData};
+use crate::image_reader::{ImageFileData, ImageFormat, ImageReader};
 
 use std::fs;
+use std::io::BufRead;
 use std::path::PathBuf;
+use std::process::Command;
 
 pub trait Benchmark: Sync + Send {
     fn run(docker_manager: DockerManager, payload: &WorkerPayload);
@@ -460,10 +462,7 @@ impl Benchmark for JXLCompressionBenchmark {
 
         let image_reader = ImageReader::new(payload.current_image_file_path.clone().to_string());
         let image_file_data = image_reader.file_data;
-        let result_file = format!(
-            "{}/results.csv",
-            res_orig_path,
-        );
+        let result_file = format!("{}/results.csv", res_orig_path,);
         println!("Result file: {}", result_file.clone());
         let csv_writer = ImageFileDataCSVWriter::new();
         csv_writer.write_csv_header(&result_file).unwrap();
@@ -473,7 +472,10 @@ impl Benchmark for JXLCompressionBenchmark {
 
         let distances = vec![0.0, 0.5, 1.0, 2.0, 3.0, 5.0, 10.0, 15.0, 25.0];
         let efforts = (1..=9).collect::<Vec<u32>>();
-        let test_set = payload.current_image_file_path.split("/").collect::<Vec<&str>>()[2];
+        let test_set = payload
+            .current_image_file_path
+            .split("/")
+            .collect::<Vec<&str>>()[2];
         let out_test_set_path = format!("{}/{}", out_comp_path, test_set);
         if !PathBuf::from(out_test_set_path.clone()).exists() {
             fs::create_dir_all(out_test_set_path.clone()).unwrap();
@@ -497,7 +499,7 @@ impl Benchmark for JXLCompressionBenchmark {
 
                 let result = docker_manager
                     .execute_cjxl(
-                        file_path.to_string(),
+                        file_path.to_string().clone(),
                         comp_image_name.clone(),
                         distance,
                         *effort,
@@ -513,16 +515,15 @@ impl Benchmark for JXLCompressionBenchmark {
                         println!("Source path: {}", src_path.clone());
                         let dest_path = format!("{}/{}", out_comp_path, comp_image_name);
                         println!("Dest path: {}", dest_path.clone());
-                        docker_manager.retrieve_file(src_path, dest_path).unwrap();
+                        docker_manager
+                            .retrieve_file(src_path.clone(), dest_path)
+                            .unwrap();
 
                         println!("Reading compressed image");
                         let image_reader =
                             ImageReader::new(format!("{}/{}", out_comp_path, comp_image_name));
                         let image_file_data = image_reader.file_data;
-                        let result_file = format!(
-                            "{}/results.csv",
-                            res_comp_path,
-                        );
+                        let result_file = format!("{}/results.csv", res_comp_path,);
                         println!("Result file: {}", result_file.clone());
                         let csv_writer = ImageFileDataCSVWriter::new();
                         csv_writer.write_csv_header(&result_file).unwrap();
@@ -533,8 +534,12 @@ impl Benchmark for JXLCompressionBenchmark {
                         println!("Comparing images");
                         JXLCompressionBenchmark::compare_images(
                             &image_file_data,
+                            &out_comp_path,
                             &res_orig_path,
                             &res_comp_path,
+                            &docker_manager,
+                            &file_path,
+                            &src_path,
                         );
                     }
                     Err(error) => {
@@ -547,12 +552,28 @@ impl Benchmark for JXLCompressionBenchmark {
 }
 
 impl JXLCompressionBenchmark {
-    fn compare_images(comp_image_data: &ImageFileData, orig_path: &str, comp_path: &str) {
+    fn compare_images(
+        comp_image_data: &ImageFileData,
+        out_comp_path: &str,
+        res_orig_path: &str,
+        res_comp_path: &str,
+        docker_manager: &DockerManager,
+        docker_input_path: &str,
+        docker_output_path: &str,
+    ) {
+        let config = Config::default();
         let csv_writer = ImageFileDataCSVWriter::new();
         let orig_entry = csv_writer
-            .find_entry(format!("{}/results.csv", orig_path).as_str(), 0, format!("{}.png", &comp_image_data.jxl_orig_image_name).as_str())
+            .find_entry(
+                format!("{}/results.csv", res_orig_path).as_str(),
+                0,
+                format!("{}.png", &comp_image_data.jxl_orig_image_name).as_str(),
+            )
             .unwrap();
-        println!("Comparing {} to {}", comp_image_data.image_name, orig_entry.image_name);
+        println!(
+            "Comparing {} to {}",
+            comp_image_data.image_name, orig_entry.image_name
+        );
 
         // Comparison calculations
         // Original file size to compressed file size ratio
@@ -574,8 +595,58 @@ impl JXLCompressionBenchmark {
         let psnr = ImageReader::calculate_psnr(mse, 255.0);
 
         // SSIM
+        let orig_image_path = format!(
+            "{}/{}",
+            config.local_test_image_dir_path,
+            orig_entry.file_path.clone()
+        );
+        let comp_image_path = format!("{}/{}", out_comp_path, comp_image_data.file_path.clone());
+        let result = Command::new("magick")
+            .arg("compare")
+            .arg("-metric")
+            .arg("SSIM")
+            .arg(orig_image_path)
+            .arg(comp_image_path)
+            .arg(format!("{}/diff.png", out_comp_path))
+            .output()
+            .unwrap();
+        let ssim = result
+            .stdout
+            .lines()
+            .next()
+            .unwrap()
+            .expect("Error calculating SSIM")
+            .parse::<f64>()
+            .unwrap();
+
         // MS-SSIM
-        
+
+        // Butteraugli
+        let result = docker_manager.execute_butteraugli(
+            docker_input_path.to_string().clone(),
+            docker_output_path.to_string().clone(),
+        );
+        let output = result.unwrap().unwrap();
+        let butteraugli = output.lines().next().unwrap().parse::<f64>().unwrap();
+        let pnorm = output
+            .lines()
+            .last()
+            .unwrap()
+            .split_whitespace()
+            .last()
+            .unwrap()
+            .parse::<f64>()
+            .unwrap();
+
+        // SSIMULACRA2
+        let result = docker_manager.execute_ssimulacra2(
+            docker_input_path.to_string().clone(),
+            docker_output_path.to_string().clone(),
+        );
+        let output = result.unwrap().unwrap();
+        println!("SSIMULACRA2 output: {}", output.clone());
+        let ssimulacra2 = output.lines().next().unwrap().parse::<f64>().unwrap();
+
         let comparison_result = ComparisonResult {
             orig_image_name: orig_entry.image_name.clone(),
             comp_image_name: comp_image_data.image_name.clone(),
@@ -589,14 +660,14 @@ impl JXLCompressionBenchmark {
             raw_size_ratio,
             mse,
             psnr,
-            ssim: 0.0,
+            ssim,
             ms_ssim: 0.0,
+            butteraugli,
+            butteraugli_pnorm: pnorm,
+            ssimulacra2,
         };
 
-        let result_file = format!(
-            "{}/comparisons.csv",
-            comp_path,
-        );
+        let result_file = format!("{}/comparisons.csv", res_comp_path,);
 
         let csv_writer = ComparisonResultCSVWriter::new();
         csv_writer.write_csv_header(&result_file).unwrap();

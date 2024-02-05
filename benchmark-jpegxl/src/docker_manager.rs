@@ -20,7 +20,11 @@ impl DockerManager {
             id,
             dockerfile: String::from(dockerfile),
             image_name: Some(String::from(DockerManager::IMAGE_NAME)),
-            container_name: Some(format!("{}-{}", String::from(DockerManager::CONTAINER_NAME), id)),
+            container_name: Some(format!(
+                "{}-{}",
+                String::from(DockerManager::CONTAINER_NAME),
+                id
+            )),
             containers: HashMap::new(),
         }
     }
@@ -89,6 +93,26 @@ impl DockerManager {
         self.execute_in_container("../libjxl/build/tools/cjxl", args)
     }
 
+    pub fn execute_ssimulacra2(
+        &self,
+        orig_file: String,
+        comp_file: String,
+    ) -> Result<Result<String, String>, Box<dyn Error>> {
+        let args = vec![orig_file.as_str(), comp_file.as_str()];
+
+        self.execute_in_container("../libjxl/build/tools/ssimulacra2", args)
+    }
+
+    pub fn execute_butteraugli(
+        &self,
+        orig_file: String,
+        comp_file: String,
+    ) -> Result<Result<String, String>, Box<dyn Error>> {
+        let args = vec![orig_file.as_str(), comp_file.as_str()];
+
+        self.execute_in_container("../libjxl/build/tools/butteraugli_main", args)
+    }
+
     /// Sets up a docker container for a benchmark worker.
     /// # Returns
     /// * `Result<(), Error>` - An error if the setup fails.
@@ -136,7 +160,10 @@ impl DockerManager {
         self.containers
             .insert(worker_id, worker_container_name.clone());
         // Start the container.
-        println!("Starting docker container... {}", worker_container_name.clone());
+        println!(
+            "Starting docker container... {}",
+            worker_container_name.clone()
+        );
         self.execute_command(
             Command::new("docker")
                 .arg("run")
