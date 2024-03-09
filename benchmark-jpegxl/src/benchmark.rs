@@ -273,6 +273,16 @@ impl Benchmarker {
         &mut self.workers[id] as &mut BenchmarkWorker
     }
 
+    pub fn wait_for_workers(&mut self) {
+        for worker in &mut self.workers {
+            if let Some(thread_handle) = worker.thread_handle.take() {
+                thread_handle.join().unwrap();
+            } else {
+                panic!("Worker {} has no thread handle", worker.id);
+            }
+        }
+    }
+
     pub fn run_benchmark<T: Benchmark + 'static>(&mut self) {
         println!("Running benchmark");
         self.current_run = Benchmarker::get_current_run(self.benchmark_dir.clone());
@@ -595,23 +605,22 @@ impl JXLCompressionBenchmark {
         let psnr = ImageReader::calculate_psnr(mse, 255.0);
 
         // SSIM
-        let orig_image_path = format!(
-            "{}/{}",
-            config.local_test_image_dir_path,
-            orig_entry.file_path.clone()
-        );
-        let comp_image_path = format!("{}/{}", out_comp_path, comp_image_data.file_path.clone());
+        let orig_image_path = orig_entry.file_path.clone();
+        let comp_image_path = comp_image_data.file_path.clone();
+        // $ magick compare -metric SSIM orig.png comp.png diff.png
+        println!("Running command: magick compare -metric SSIM {} {} {}/diff.png", orig_image_path, comp_image_path, out_comp_path);
         let result = Command::new("magick")
             .arg("compare")
             .arg("-metric")
             .arg("SSIM")
             .arg(orig_image_path)
             .arg(comp_image_path)
-            .arg(format!("{}/diff.png", out_comp_path))
-            .output()
-            .unwrap();
+            .arg("null:")
+            .output();
+        println!("Result: {:?}", result);
         let ssim = result
-            .stdout
+            .unwrap()
+            .stderr
             .lines()
             .next()
             .unwrap()
@@ -620,6 +629,7 @@ impl JXLCompressionBenchmark {
             .unwrap();
 
         // MS-SSIM
+        // TODO: Implement MS-SSIM
 
         // Butteraugli
         let result = docker_manager.execute_butteraugli(
