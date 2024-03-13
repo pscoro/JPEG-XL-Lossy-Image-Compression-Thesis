@@ -1,0 +1,7 @@
+/benchmarks
+*.diff
+*.uxf
+*.jxl
+*.png
+/test_images
+/test_images copy

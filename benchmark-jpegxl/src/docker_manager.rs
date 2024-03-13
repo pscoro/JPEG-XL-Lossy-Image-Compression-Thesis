@@ -20,7 +20,11 @@ impl DockerManager {
             id,
             dockerfile: String::from(dockerfile),
             image_name: Some(String::from(DockerManager::IMAGE_NAME)),
-            container_name: Some(format!("{}-{}", String::from(DockerManager::CONTAINER_NAME), id)),
+            container_name: Some(format!(
+                "{}-{}",
+                String::from(DockerManager::CONTAINER_NAME),
+                id
+            )),
             containers: HashMap::new(),
         }
     }
@@ -61,6 +65,22 @@ impl DockerManager {
         distance: f64,
         effort: u32,
     ) -> Result<Result<String, String>, Box<dyn Error>> {
+        _ = self.execute_in_container(
+            "mkdir",
+            vec![
+                "-p",
+                format!(
+                    "{}",
+                    output_file
+                        .clone()
+                        .split("/")
+                        .take(output_file.split("/").count() - 1)
+                        .collect::<Vec<&str>>()
+                        .join("/")
+                )
+                .as_str(),
+            ],
+        )?;
         let distance = format!("--distance={}", distance);
         let effort = format!("--effort={}", effort);
         let args = vec![
@@ -70,17 +90,38 @@ impl DockerManager {
             effort.as_str(),
         ];
 
-        self.execute_in_container("../libjxl/build/tools/cjxl", args)
+        //println!("Executing cjxl");
+        //println!("Args: {:?}", args);
+        self.execute_in_container("/libjxl/build/tools/cjxl", args)
+    }
+
+    pub fn execute_ssimulacra2(
+        &self,
+        orig_file: String,
+        comp_file: String,
+    ) -> Result<Result<String, String>, Box<dyn Error>> {
+        let args = vec![orig_file.as_str(), comp_file.as_str()];
+
+        self.execute_in_container("../libjxl/build/tools/ssimulacra2", args)
+    }
+
+    pub fn execute_butteraugli(
+        &self,
+        orig_file: String,
+        comp_file: String,
+    ) -> Result<Result<String, String>, Box<dyn Error>> {
+        let args = vec![orig_file.as_str(), comp_file.as_str()];
+
+        //println!("Executing butteraugli");
+        //println!("Args: {:?}", args);
+        self.execute_in_container("/libjxl/build/tools/butteraugli_main", args)
     }
 
     /// Sets up a docker container for a benchmark worker.
     /// # Returns
     /// * `Result<(), Error>` - An error if the setup fails.
     pub fn setup(&mut self, worker_id: usize) -> Result<(), Box<dyn Error>> {
-        println!("Setting up docker container for worker {}...", worker_id);
-
         // Build the docker image.
-        println!("Building docker image...");
         match self.execute_command(
             Command::new("docker")
                 .arg("build")
@@ -92,7 +133,7 @@ impl DockerManager {
         ) {
             Ok(_) => {}
             Err(_) => {
-                println!("Error building docker image");
+                return Err(Box::from("Failed to build docker image"));
             }
         }
 
@@ -120,7 +161,10 @@ impl DockerManager {
         self.containers
             .insert(worker_id, worker_container_name.clone());
         // Start the container.
-        println!("Starting docker container... {}", worker_container_name.clone());
+        println!(
+            "Starting docker container... {}",
+            worker_container_name.clone()
+        );
         self.execute_command(
             Command::new("docker")
                 .arg("run")
@@ -146,10 +190,10 @@ impl DockerManager {
         subcommand: &str,
         args: Vec<&str>,
     ) -> Result<Result<String, String>, Box<dyn Error>> {
-        println!("Executing command: {} {}", subcommand, args.join(" "));
-
         let mut command = Command::new("docker");
         command.arg("exec");
+        command.arg("-w");
+        command.arg("/temp");
         command.arg(self.container_name.as_ref().unwrap());
         command.arg(subcommand);
         command.args(args.as_slice());
@@ -162,7 +206,11 @@ impl DockerManager {
         if output.status.success() {
             Ok(Ok(stdout))
         } else {
-            Ok(Err(stderr))
+            if stderr.len() > 0 {
+                Ok(Err(stderr))
+            } else {
+                Ok(Err(stdout))
+            }
         }
     }
 
@@ -171,7 +219,6 @@ impl DockerManager {
     /// # Returns
     /// * `Result<(), Error>` - An error if the teardown fails.
     pub fn teardown(&self) -> Result<(), Box<dyn Error>> {
-        println!("Tearing down docker container...");
         // clean the /temp folder
         self.execute_command(
             Command::new("docker")
@@ -183,7 +230,6 @@ impl DockerManager {
         )?;
 
         // Stop the container.
-        println!("Stopping docker container...");
         self.execute_command(
             Command::new("docker")
                 .arg("stop")
@@ -191,7 +237,6 @@ impl DockerManager {
         )?;
 
         // Remove the container.
-        println!("Removing docker container...");
         self.execute_command(
             Command::new("docker")
                 .arg("rm")
@@ -199,7 +244,6 @@ impl DockerManager {
         )?;
 
         // Remove the image.
-        println!("Removing docker image...");
         self.execute_command(
             Command::new("docker")
                 .arg("rmi")
@@ -207,5 +251,82 @@ impl DockerManager {
         )?;
 
         Ok(())
+    }
+
+    pub fn change_libjxl_commit(&self, commit: &str) -> Result<String, Box<dyn Error>> {
+        let mut command = Command::new("docker");
+        command.arg("exec");
+        command.arg(self.container_name.as_ref().unwrap());
+        command.arg("bash");
+        command.arg("-c");
+        command.arg(format!(
+            "cd /libjxl && git fetch origin && git checkout {} && cd -",
+            commit
+        ));
+
+        self.execute_command(&mut command)
+    }
+
+    pub fn apply_diff(&self, diff: &str) -> Result<String, Box<dyn Error>> {
+        let mut command = Command::new("docker");
+        command.arg("exec");
+        command.arg(self.container_name.as_ref().unwrap());
+        command.arg("bash");
+        command.arg("-c");
+        command.arg(format!("cd /libjxl && git apply {} && cd -", diff));
+
+        self.execute_command(&mut command)
+    }
+
+    pub fn apply_local_as_diff(&self) -> Result<String, Box<dyn Error>> {
+        // Copy diff to docker container
+        let _ = self.execute_command(
+            Command::new("docker")
+                .arg("cp")
+                .arg("local.diff")
+                .arg(format!(
+                    "{}:/libjxl/local.diff",
+                    self.container_name.as_ref().unwrap()
+                )),
+        );
+
+        let _ = self.apply_diff("local.diff");
+/*
+        // Remove local.diff
+        let _ = self.execute_command(
+            Command::new("docker")
+                .arg("exec")
+                .arg(self.container_name.as_ref().unwrap())
+                .arg("rm")
+                .arg("/libjxl/local.diff"),
+        );
+
+        let mut command = Command::new("rm");
+        command.arg("local.diff");
+        self.execute_command(&mut command)
+*/
+        Ok(String::from("Applied local folder as diff"))
+    }
+
+    pub fn build_libjxl(&self) -> Result<String, Box<dyn Error>> {
+        let mut command = Command::new("docker");
+        command.arg("exec");
+        command.arg(self.container_name.as_ref().unwrap());
+        command.arg("bash");
+        command.arg("-c");
+        command.arg("cd /libjxl && ./ci.sh opt; exit 0 && cd -");
+
+        self.execute_command(&mut command)
+    }
+
+    pub fn clean_libjxl(&self) -> Result<String, Box<dyn Error>> {
+        let mut command = Command::new("docker");
+        command.arg("exec");
+        command.arg(self.container_name.as_ref().unwrap());
+        command.arg("bash");
+        command.arg("-c");
+        command.arg("cd /libjxl && git clean -fdx && cd -");
+
+        self.execute_command(&mut command)
     }
 }

@@ -2,8 +2,8 @@ use serde::{Serialize, Serializer};
 use serde_derive::Serialize;
 
 use image::DynamicImage;
+use std::fmt::{self, Debug, Display, Formatter};
 use std::path::Path;
-use std::fmt::{self, Display, Formatter, Debug};
 
 use jpegxl_rs::decode::{JxlDecoder, Metadata, Pixels};
 use jpegxl_rs::decoder_builder;
@@ -271,9 +271,88 @@ impl From<String> for ImageFormat {
         }
     }
 }
+#[derive(Clone, Copy)]
+pub struct JXLf32(Option<f32>);
 
-#[derive(Clone)]
+impl From<JXLf32> for f32 {
+    fn from(value: JXLf32) -> Self {
+        match value.0 {
+            Some(value) => value,
+            None => 0.0,
+        }
+    }
+}
+
+impl From<f32> for JXLf32 {
+    fn from(value: f32) -> Self {
+        JXLf32(Some(value))
+    }
+}
+
+impl From<String> for JXLf32 {
+    fn from(value: String) -> Self {
+        if value.is_empty() {
+            JXLf32(None)
+        } else {
+            JXLf32(Some(value.parse::<f32>().unwrap()))
+        }
+    }
+}
+
+impl Serialize for JXLf32 {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        match &self.0 {
+            Some(value) => serializer.serialize_f32(*value),
+            None => serializer.serialize_str(""),
+        }
+    }
+}
+
+impl Display for JXLf32 {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match &self.0 {
+            Some(value) => write!(f, "{}", value),
+            None => write!(f, ""),
+        }
+    }
+}
+
+impl Debug for JXLf32 {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match &self.0 {
+            Some(value) => write!(f, "{}", value),
+            None => write!(f, ""),
+        }
+    }
+}
+
+impl JXLf32 {
+    pub fn new(value: Option<f32>) -> JXLf32 {
+        JXLf32(value)
+    }
+
+    pub fn to_string(&self) -> String {
+        match self.0 {
+            Some(value) => value.to_string(),
+            None => "".to_string(),
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
 pub struct JXLu32(Option<u32>);
+
+impl From<JXLu32> for u32 {
+    fn from(value: JXLu32) -> Self {
+        match value.0 {
+            Some(value) => value,
+            None => 0,
+        }
+    }
+}
 
 impl From<u32> for JXLu32 {
     fn from(value: u32) -> Self {
@@ -393,6 +472,7 @@ impl Debug for JXLString {
 #[derive(Debug, Clone, Serialize)]
 pub struct ImageFileData {
     pub image_name: String,
+    pub commit: String,
     pub test_set: String,
     pub file_path: String,
     pub width: u32,
@@ -402,7 +482,7 @@ pub struct ImageFileData {
     pub color_space: ColorType,
     pub file_format: ImageFormat,
     pub jxl_orig_image_name: JXLString,
-    pub jxl_distance: JXLu32,
+    pub jxl_distance: JXLf32,
     pub jxl_effort: JXLu32,
 }
 
@@ -412,21 +492,28 @@ pub struct ImageReader {
 }
 
 impl ImageReader {
-    pub fn new(file_path: String) -> ImageReader {
-        println!("Reading image from {}", file_path);
+    pub fn new(file_path: String, commit: String) -> ImageReader {
         let path = Path::new(&file_path);
         let extension = path.extension().unwrap().to_str().unwrap();
-        println!("Extension: {}", extension);
         if extension == "jxl" {
-            return ImageReader::read_jxl(file_path);
+            return ImageReader::read_jxl(file_path, commit);
         }
-        let image = image::open(&file_path).unwrap();
+
+        let image = image::open(&path).unwrap();
 
         ImageReader {
             image: Some(image.clone()),
             file_data: ImageFileData {
                 image_name: path.file_name().unwrap().to_str().unwrap().to_string(),
-                test_set: path.parent().unwrap().file_name().unwrap().to_str().unwrap().to_string(),
+                commit,
+                test_set: path
+                    .parent()
+                    .unwrap()
+                    .file_name()
+                    .unwrap()
+                    .to_str()
+                    .unwrap()
+                    .to_string(),
                 file_path: file_path.clone(),
                 width: image.width(),
                 height: image.height(),
@@ -435,33 +522,38 @@ impl ImageReader {
                 color_space: image.color().into(),
                 file_format: ImageReader::get_format(&file_path),
                 jxl_orig_image_name: JXLString::new(None),
-                jxl_distance: JXLu32::new(None),
+                jxl_distance: JXLf32::new(None),
                 jxl_effort: JXLu32::new(None),
             },
         }
     }
 
-    fn read_jxl(file_path: String) -> ImageReader {
+    fn read_jxl(file_path: String, commit: String) -> ImageReader {
         let sample = std::fs::read(file_path.clone()).unwrap();
         let decoder: JxlDecoder = decoder_builder().build().unwrap();
         let (metadata, pixels) = decoder.decode(&sample).unwrap();
-        // file_path: .../<test_set>/<orig_image_name>-<distance>-<effort>.jxl
         let path = Path::new(&file_path);
         let file_name = path.file_name().unwrap().to_str().unwrap().to_string();
         let extension = path.extension().unwrap().to_str().unwrap();
         let file_name_parts: Vec<&str> = file_name.split("-").collect();
         let orig_image_name = file_name_parts[0..file_name_parts.len() - 2].join("-");
 
-        let distance = file_name_parts[file_name_parts.len() - 2].parse::<u32>();
+        let distance = file_name_parts[file_name_parts.len() - 2].parse::<f32>();
         let distance = match extension {
             "jxl" => match distance {
-                Ok(value) => JXLu32::new(Some(value)),
-                Err(_) => JXLu32::new(None),
+                Ok(value) => JXLf32::new(Some(value)),
+                Err(_) => JXLf32::new(None),
             },
-            _ => JXLu32::new(None),
+            _ => JXLf32::new(None),
         };
 
-        let effort = file_name_parts.last().unwrap().split(".").next().unwrap().parse::<u32>();
+        let effort = file_name_parts
+            .last()
+            .unwrap()
+            .split(".")
+            .next()
+            .unwrap()
+            .parse::<u32>();
         let effort = match extension {
             "jxl" => match effort {
                 Ok(value) => JXLu32::new(Some(value)),
@@ -478,6 +570,7 @@ impl ImageReader {
             image: None,
             file_data: ImageFileData {
                 image_name: file_name.clone(),
+                commit,
                 test_set: Path::new(&file_path)
                     .parent()
                     .unwrap()
@@ -578,18 +671,18 @@ impl ImageReader {
         let decoder: JxlDecoder = decoder_builder().build().unwrap();
         let comp_image = std::fs::read(comp_image_path.clone()).unwrap();
         let (comp_metadata, comp_pixels) = decoder.decode(&comp_image).unwrap();
-//        let orig_image = match ColorType::get_jxl_color_space(&comp_metadata, &comp_pixels) {
-//            ColorType::L8 => orig_image.to_luma8(),
-//            ColorType::La8 => orig_image.to_luma_alpha8(),
-//            ColorType::Rgb8 => orig_image.to_rgb8(),
-//            ColorType::Rgba8 => orig_image.to_rgba8(),
-//            ColorType::L16 => orig_image.to_luma16(),
-//            ColorType::La16 => orig_image.to_luma_alpha16(),
-//            ColorType::Rgb16 => orig_image.to_rgb16(),
-//            ColorType::Rgba16 => orig_image.to_rgba16(),
-//            ColorType::Rgb32F => orig_image.to_rgb32f(),
-//            ColorType::Rgba32F => orig_image.to_rgba32f(),
-//        };
+        //        let orig_image = match ColorType::get_jxl_color_space(&comp_metadata, &comp_pixels) {
+        //            ColorType::L8 => orig_image.to_luma8(),
+        //            ColorType::La8 => orig_image.to_luma_alpha8(),
+        //            ColorType::Rgb8 => orig_image.to_rgb8(),
+        //            ColorType::Rgba8 => orig_image.to_rgba8(),
+        //            ColorType::L16 => orig_image.to_luma16(),
+        //            ColorType::La16 => orig_image.to_luma_alpha16(),
+        //            ColorType::Rgb16 => orig_image.to_rgb16(),
+        //            ColorType::Rgba16 => orig_image.to_rgba16(),
+        //            ColorType::Rgb32F => orig_image.to_rgb32f(),
+        //            ColorType::Rgba32F => orig_image.to_rgba32f(),
+        //        };
         let orig_image = match ColorType::get_jxl_color_space(&comp_metadata, &comp_pixels) {
             ColorType::Rgb8 => orig_image.to_rgb8(),
             _ => todo!(),
