@@ -35,12 +35,10 @@ fn main() {
     println!("Benchmark JPEG-XL");
 
     // Parse arguments.
-    println!("Parsing arguments");
     let args = Args::parse();
 
     // Set up config.
     // Use default config and add arguments.
-    println!("Setting up config");
     let mut config = Config::default();
     config.use_temp_dir = args.temp;
     config.libjxl_commit = args.libjxl_commit;
@@ -49,7 +47,6 @@ fn main() {
 
     // Set up benchmark directory.
     // Append "/temp" to benchmark directory if --temp is set.
-    println!("Setting up benchmark directory");
     let benchmark_path = config.benchmark_dir_path.to_owned()
         + match args.temp {
             true => "/temp",
@@ -58,6 +55,7 @@ fn main() {
                 false => "",
             },
         };
+    config.benchmark_dir_path = benchmark_path.clone();
 
     // Clean benchmark directory if --clean is set.
     match args.clean {
@@ -73,13 +71,7 @@ fn main() {
     fs::create_dir_all(benchmark_path.clone()).unwrap();
 
     // Set up benchmarker.
-    println!("Setting up benchmarker");
-    let mut benchmarker = Benchmarker::new(
-        benchmark_path,
-        config.local_test_image_dir_path.to_owned(),
-        config.docker_test_image_dir_path.to_owned(),
-        config.num_workers
-    );
+    let mut benchmarker = Benchmarker::new(&config);
 
     //    println!("Running collect image metadata benchmark");
     //    let collect_image_metadata_benchmark = CollectImageMetadataBenchmark {};
@@ -90,9 +82,8 @@ fn main() {
     benchmarker.run_benchmark::<JXLCompressionBenchmark>();
 
     // Wait for workers to finish.
-    println!("Waiting for workers to finish");
-    benchmarker.wait_for_workers();
+    benchmarker.wait_for_all_workers();
 
     // Teardown benchmarker.
-    benchmarker.teardown();
+//    benchmarker.teardown();
 }

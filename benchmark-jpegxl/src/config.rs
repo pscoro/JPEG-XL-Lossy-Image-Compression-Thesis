@@ -1,8 +1,8 @@
 pub struct Config {
-    pub benchmark_dir_path: &'static str,
-    pub docker_file_path: &'static str,
-    pub local_test_image_dir_path: &'static str,
-    pub docker_test_image_dir_path: &'static str,
+    pub benchmark_dir_path: String,
+    pub docker_file_path: String,
+    pub local_test_image_dir_path: String,
+    pub docker_test_image_dir_path: String,
     pub num_workers: usize,
 
     pub use_temp_dir: bool,
@@ -14,11 +14,11 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Config {
-            benchmark_dir_path: "./benchmarks",
-            docker_file_path: "./Dockerfile",
-            local_test_image_dir_path: "./test_images",
-            docker_test_image_dir_path: "/test_images",
-            num_workers: 16,
+            benchmark_dir_path: "./benchmarks".to_string(),
+            docker_file_path: "./Dockerfile".to_string(),
+            local_test_image_dir_path: "./test_images".to_string(),
+            docker_test_image_dir_path: "/test_images".to_string(),
+            num_workers: 8,
 
             use_temp_dir: false,
             libjxl_commit: None,

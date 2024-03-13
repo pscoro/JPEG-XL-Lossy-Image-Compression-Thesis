@@ -472,6 +472,7 @@ impl Debug for JXLString {
 #[derive(Debug, Clone, Serialize)]
 pub struct ImageFileData {
     pub image_name: String,
+    pub commit: String,
     pub test_set: String,
     pub file_path: String,
     pub width: u32,
@@ -491,20 +492,20 @@ pub struct ImageReader {
 }
 
 impl ImageReader {
-    pub fn new(file_path: String) -> ImageReader {
-        println!("Reading image from {}", file_path);
+    pub fn new(file_path: String, commit: String) -> ImageReader {
         let path = Path::new(&file_path);
         let extension = path.extension().unwrap().to_str().unwrap();
-        println!("Extension: {}", extension);
         if extension == "jxl" {
-            return ImageReader::read_jxl(file_path);
+            return ImageReader::read_jxl(file_path, commit);
         }
-        let image = image::open(&file_path).unwrap();
+
+        let image = image::open(&path).unwrap();
 
         ImageReader {
             image: Some(image.clone()),
             file_data: ImageFileData {
                 image_name: path.file_name().unwrap().to_str().unwrap().to_string(),
+                commit,
                 test_set: path
                     .parent()
                     .unwrap()
@@ -527,11 +528,10 @@ impl ImageReader {
         }
     }
 
-    fn read_jxl(file_path: String) -> ImageReader {
+    fn read_jxl(file_path: String, commit: String) -> ImageReader {
         let sample = std::fs::read(file_path.clone()).unwrap();
         let decoder: JxlDecoder = decoder_builder().build().unwrap();
         let (metadata, pixels) = decoder.decode(&sample).unwrap();
-        // file_path: .../<test_set>/<orig_image_name>-<distance>-<effort>.jxl
         let path = Path::new(&file_path);
         let file_name = path.file_name().unwrap().to_str().unwrap().to_string();
         let extension = path.extension().unwrap().to_str().unwrap();
@@ -570,6 +570,7 @@ impl ImageReader {
             image: None,
             file_data: ImageFileData {
                 image_name: file_name.clone(),
+                commit,
                 test_set: Path::new(&file_path)
                     .parent()
                     .unwrap()
