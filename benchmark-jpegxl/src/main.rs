@@ -70,6 +70,7 @@ fn main() {
     println!("Creating benchmark directory at {}", benchmark_path);
     fs::create_dir_all(benchmark_path.clone()).unwrap();
 
+    println!("Benchmark directory: {}", benchmark_path);
     // Set up benchmarker.
     let mut benchmarker = Benchmarker::new(&config);
 
@@ -85,5 +86,5 @@ fn main() {
     benchmarker.wait_for_all_workers();
 
     // Teardown benchmarker.
-//    benchmarker.teardown();
+    //    benchmarker.teardown();
 }

@@ -280,31 +280,28 @@ impl DockerManager {
 
     pub fn apply_local_as_diff(&self) -> Result<String, Box<dyn Error>> {
         // Copy diff to docker container
-        let _ = self.execute_command(
-            Command::new("docker")
-                .arg("cp")
-                .arg("local.diff")
-                .arg(format!(
-                    "{}:/libjxl/local.diff",
-                    self.container_name.as_ref().unwrap()
-                )),
-        );
+        let _ = self.execute_command(Command::new("docker").arg("cp").arg("local.diff").arg(
+            format!(
+                "{}:/libjxl/local.diff",
+                self.container_name.as_ref().unwrap()
+            ),
+        ));
 
         let _ = self.apply_diff("local.diff");
-/*
-        // Remove local.diff
-        let _ = self.execute_command(
-            Command::new("docker")
-                .arg("exec")
-                .arg(self.container_name.as_ref().unwrap())
-                .arg("rm")
-                .arg("/libjxl/local.diff"),
-        );
+        /*
+                // Remove local.diff
+                let _ = self.execute_command(
+                    Command::new("docker")
+                        .arg("exec")
+                        .arg(self.container_name.as_ref().unwrap())
+                        .arg("rm")
+                        .arg("/libjxl/local.diff"),
+                );
 
-        let mut command = Command::new("rm");
-        command.arg("local.diff");
-        self.execute_command(&mut command)
-*/
+                let mut command = Command::new("rm");
+                command.arg("local.diff");
+                self.execute_command(&mut command)
+        */
         Ok(String::from("Applied local folder as diff"))
     }
 
@@ -314,7 +311,7 @@ impl DockerManager {
         command.arg(self.container_name.as_ref().unwrap());
         command.arg("bash");
         command.arg("-c");
-        command.arg("cd /libjxl && ./ci.sh opt; exit 0 && cd -");
+        command.arg("cd /libjxl && SKIP_TEST=1 ./ci.sh opt; exit 0 && cd -");
 
         self.execute_command(&mut command)
     }

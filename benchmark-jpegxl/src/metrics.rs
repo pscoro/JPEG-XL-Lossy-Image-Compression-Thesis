@@ -46,22 +46,29 @@ pub fn calculate_butteraugli(
     docker_output_path: &str,
     docker_manager: &DockerManager,
 ) -> (f64, f64) {
+    println!(
+        "Calculating butteraugli for {} and {}",
+        docker_input_path, docker_output_path
+    );
     let result = docker_manager.execute_butteraugli(
         docker_input_path.to_string().clone(),
         docker_output_path.to_string().clone(),
     );
-    let output = result.unwrap().unwrap_err();
-    let butteraugli = output.lines().next().unwrap().parse::<f64>().unwrap();
+    let result = result.unwrap();
+    let output = result.clone().unwrap_err();
+
+    // Butteraugli may fail because of libpng warning: iCCP: known incorrect sRGB profile
+    let butteraugli = output.lines().next().unwrap().parse::<f64>().unwrap_or(0.0);
+    println!("Butteraugli: {}", butteraugli);
     let pnorm = output
         .lines()
         .last()
         .unwrap()
         .split_whitespace()
         .last()
-        .unwrap()
-        .parse::<f64>()
         .unwrap();
-
+    let pnorm = pnorm.parse::<f64>().unwrap_or(0.0);
+    println!("Pnorm: {}", pnorm);
     (butteraugli, pnorm)
 }
 

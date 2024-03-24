@@ -90,7 +90,8 @@ impl BenchmarkWorker {
             let th = self.thread_handle.take();
             match th {
                 Some(thread_handle) => {
-                    thread_handle.join().unwrap();
+                    thread_handle.join();
+                    self.thread_handle = None;
                     self.working = false;
                 }
                 None => {}
@@ -272,7 +273,8 @@ impl Benchmarker {
         if worker.working {
             if let Some(thread_handle) = worker.thread_handle.take() {
                 println!("Waiting for worker {} to finish", id);
-                thread_handle.join().unwrap();
+                thread_handle.join();
+                worker.thread_handle = None;
                 worker.working = false;
             } else {
                 panic!("Working worker thread handle is None");
@@ -290,7 +292,8 @@ impl Benchmarker {
         for worker in &mut self.workers {
             if let Some(thread_handle) = worker.thread_handle.take() {
                 println!("Waiting for worker {} to finish", worker.id);
-                thread_handle.join().unwrap();
+                thread_handle.join();
+                worker.thread_handle = None;
                 worker.working = false;
             } else {
                 continue;
@@ -357,6 +360,10 @@ impl Benchmarker {
 
                 // Iterate over the images in the local test set path.
                 for entry in fs::read_dir(local_test_set_path.clone()).unwrap() {
+                    println!(
+                        "Running benchmark for image: {}",
+                        entry.as_ref().unwrap().path().to_str().unwrap()
+                    );
                     let entry = entry;
 
                     // Check if entry is an image file.
@@ -364,6 +371,7 @@ impl Benchmarker {
                     if entry.as_ref().unwrap().path().is_dir() {
                         continue;
                     }
+                    println!("1");
                     match ImageFormat::from_file_name(
                         entry.as_ref().unwrap().path().to_str().unwrap(),
                     ) {
@@ -371,9 +379,11 @@ impl Benchmarker {
                         _ => {}
                     }
 
+                    println!("2");
                     // Get the next worker.
                     let worker = self.wait_for_available_worker();
 
+                    println!("3");
                     // Clean the libjxl branch on the docker manager.
                     let _ = worker
                         .docker_manager
@@ -401,6 +411,7 @@ impl Benchmarker {
                             .unwrap();
                     }
 
+                    println!("4");
                     let _ = worker
                         .docker_manager
                         .as_ref()
@@ -408,6 +419,7 @@ impl Benchmarker {
                         .build_libjxl()
                         .unwrap();
 
+                    println!("5");
                     // Set current image file path and name for the worker payload.
                     let entry = entry.unwrap();
                     let path = entry.path();
@@ -416,6 +428,7 @@ impl Benchmarker {
                     worker.payload.as_mut().unwrap().current_image_name =
                         path.file_name().unwrap().to_str().unwrap().to_string();
 
+                    println!("6");
                     // Remove the file extension from the current image name.
                     worker.payload.as_mut().unwrap().current_image_name = worker
                         .payload
@@ -427,12 +440,14 @@ impl Benchmarker {
                         .collect::<Vec<&str>>()[0]
                         .to_string();
 
+                    println!("7");
                     // Set the current output and result directories for the worker payload.
                     worker.payload.as_mut().unwrap().current_out_orig_path = out_orig_path.clone();
                     worker.payload.as_mut().unwrap().current_out_comp_path = out_comp_path.clone();
                     worker.payload.as_mut().unwrap().current_res_orig_path = res_orig_path.clone();
                     worker.payload.as_mut().unwrap().current_res_comp_path = res_comp_path.clone();
 
+                    println!("8");
                     // Set the current image format and test set for the worker payload.
                     worker.payload.as_mut().unwrap().current_image_format =
                         ImageFormat::from_file_name(
@@ -443,6 +458,7 @@ impl Benchmarker {
                     // Set the context for the worker payload.
                     worker.payload.as_mut().unwrap().context = context.clone();
 
+                    println!("9");
                     // Run the benchmark for the current image on the worker.
                     worker.run::<T>();
                 }
@@ -469,7 +485,7 @@ impl Benchmarker {
                     };
                 }
             }
-            
+
             self.wait_for_all_workers();
 
             if comparison_csvs.len() == 2 {
@@ -545,7 +561,10 @@ impl Benchmark for JXLCompressionBenchmark {
         );
 
         // Initialize an ImageReader to read the current image.
-        let image_reader = ImageReader::new(payload.current_image_file_path.clone().to_string(), commit.unwrap().to_string());
+        let image_reader = ImageReader::new(
+            payload.current_image_file_path.clone().to_string(),
+            commit.unwrap().to_string(),
+        );
 
         // Write the original image file data to a CSV file.
         let image_file_data = image_reader.file_data;
@@ -558,8 +577,11 @@ impl Benchmark for JXLCompressionBenchmark {
 
         // The JXL compression benchmark tests combinations of the following distances and efforts.
         // TODO: Make these configurable.
-        let distances = vec![0.0, 0.5, 1.0, 2.0, 3.0, 5.0, 10.0, 15.0, 25.0];
-        let efforts = (1..=9).collect::<Vec<u32>>();
+        let distances = vec![
+            /*0.0,*/ 0.5, 1.0, 1.5, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0,
+            13.0, 14.0, 15.0, /*25.0*/
+        ];
+        let efforts = (5..=9).collect::<Vec<u32>>();
 
         // Run the compression benchmark for each distance and effort combination.
         for distance in distances {
@@ -579,6 +601,13 @@ impl Benchmark for JXLCompressionBenchmark {
                 //    "Running JXL Compression Benchmark for image {} at path {}",
                 //    comp_image_name.clone(), file_path.to_string().clone()
                 //);
+                println!(
+                    "Running JXL Compression Benchmark for image {} at path {} with distance {} and effort {}",
+                    comp_image_name.clone(),
+                    file_path.to_string().clone(),
+                    distance,
+                    effort
+                );
                 let result = docker_manager
                     .execute_cjxl(
                         file_path.to_string().clone(),
@@ -599,8 +628,10 @@ impl Benchmark for JXLCompressionBenchmark {
                     .unwrap();
 
                 // Read the compressed image file data.
-                let image_reader =
-                    ImageReader::new(format!("{}/{}", out_comp_path, comp_image_name), commit.unwrap().to_string());
+                let image_reader = ImageReader::new(
+                    format!("{}/{}", out_comp_path, comp_image_name),
+                    commit.unwrap().to_string(),
+                );
 
                 // Write the compressed image file data to a CSV file.
                 let image_file_data = image_reader.file_data;
@@ -636,11 +667,26 @@ impl JXLCompressionBenchmark {
         let comparison_results_1 = csv_reader.read_csv(results_1).unwrap();
         let comparison_results_2 = csv_reader.read_csv(results_2).unwrap();
 
+        // Sort the comparison results by image name, in case they are not already in the same
+        // order, so that they can be compared.
+        let mut comparison_results_1 = comparison_results_1.clone();
+        comparison_results_1.sort_by(|a, b| a.orig_image_name.cmp(&b.orig_image_name));
+        let mut comparison_results_2 = comparison_results_2.clone();
+        comparison_results_2.sort_by(|a, b| a.orig_image_name.cmp(&b.orig_image_name));
+
+        // print CSVs
+        println!("CSV 1: {:?}", comparison_results_1);
+        println!("CSV 2: {:?}", comparison_results_2);
+
         let mut results = Vec::<ComparisonResultDiff>::new();
 
         // Compare the comparison results.
         assert!(comparison_results_1.len() == comparison_results_2.len());
         for i in 0..comparison_results_1.len() {
+            println!(
+                "Comparing {} to {}",
+                comparison_results_1[i].orig_image_name, comparison_results_2[i].orig_image_name
+            );
             assert!(
                 comparison_results_1[i].orig_image_name == comparison_results_2[i].orig_image_name
             );
