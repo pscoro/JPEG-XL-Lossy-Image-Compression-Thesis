@@ -1,3 +1,4 @@
+/// Context struct that holds all the information needed to run the benchmark.
 #[derive(Debug, Clone)]
 pub struct Context {
     pub benchmark_dir: String,
@@ -12,4 +13,5 @@ pub struct Context {
     pub compare_to_commit: Option<String>,
 }
 
+/// Default values for the context struct.
 pub const DEFAULT_LIBJXL_COMMIT: &str = "main";
