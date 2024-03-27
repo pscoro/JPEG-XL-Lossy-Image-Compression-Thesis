@@ -29,12 +29,12 @@ struct Args {
 }
 
 /**
- * Main function for the JPEG-XL becnhmarker.
+ * Main function for the JPEG-XL benchmarking tool.
  */
 fn main() {
     println!("Benchmark JPEG-XL");
 
-    // Parse arguments.
+    // Parse command-line arguments.
     let args = Args::parse();
 
     // Set up config.
@@ -60,30 +60,26 @@ fn main() {
     // Clean benchmark directory if --clean is set.
     match args.clean {
         true => {
-            println!("Cleaning benchmark directory at {}", benchmark_path);
             fs::remove_dir_all(benchmark_path.clone()).unwrap();
         }
         false => {}
     }
 
     // Create benchmark directory.
-    println!("Creating benchmark directory at {}", benchmark_path);
     fs::create_dir_all(benchmark_path.clone()).unwrap();
 
     // Set up benchmarker.
     let mut benchmarker = Benchmarker::new(&config);
 
-    //    println!("Running collect image metadata benchmark");
-    //    let collect_image_metadata_benchmark = CollectImageMetadataBenchmark {};
-    //    benchmarker.run_benchmark(&collect_image_metadata_benchmark);
-
     // Run JPEG-XL Compression benchmark.
-    println!("Running JPEG-XL Compression benchmark");
+    println!("Running JPEG-XL Compression benchmark...");
     benchmarker.run_benchmark::<JXLCompressionBenchmark>();
 
     // Wait for workers to finish.
     benchmarker.wait_for_all_workers();
 
+    println!("JPEG-XL Compression benchmark finished.");
+
     // Teardown benchmarker.
-//    benchmarker.teardown();
+    //    benchmarker.teardown();
 }

@@ -9,26 +9,17 @@ use crate::utils::*;
 use std::fs;
 use std::path::PathBuf;
 
-/**
- * Benchmark trait
- * All benchmarks should implement this trait.
- * The run method should be called to run the benchmark.
- */
+/// All benchmarks should implement this trait.
+/// The run method should be called to run the benchmark.
 pub trait Benchmark: Sync + Send {
     fn run(docker_manager: DockerManager, payload: &WorkerPayload);
 }
 
-/**
- * JXLCompressionBenchmark
- * Benchmark for JPEG XL compression.
- * Implements the Benchmark trait.
- */
+/// Benchmark for JPEG XL compression.
+/// Implements the Benchmark trait.
 pub struct JXLCompressionBenchmark {}
 
-/**
- * Benchmarker
- * State for running benchmarks.
- */
+/// Runs benchmarks on multiple workers.
 #[derive(Debug)]
 pub struct Benchmarker {
     pub context: Context,
@@ -36,6 +27,9 @@ pub struct Benchmarker {
     pub current_worker_id: usize,
 }
 
+/// Represents a worker that runs a benchmark.
+/// Contains a DockerManager and a thread handle.
+/// The worker may execute commands on the DockerManager.
 #[derive(Debug)]
 pub struct BenchmarkWorker {
     pub id: usize,
@@ -45,6 +39,7 @@ pub struct BenchmarkWorker {
     pub working: bool,
 }
 
+/// Represents the payload for a worker.
 #[derive(Debug, Clone)]
 pub struct WorkerPayload {
     pub context: Context,
@@ -59,21 +54,15 @@ pub struct WorkerPayload {
     pub current_test_set: String,
 }
 
-impl PartialEq for BenchmarkWorker {
-    fn eq(&self, other: &Self) -> bool {
-        self.id == other.id
-    }
-}
-
-impl Eq for BenchmarkWorker {}
-
-impl std::hash::Hash for BenchmarkWorker {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.id.hash(state);
-    }
-}
-
 impl BenchmarkWorker {
+    /// Creates a new BenchmarkWorker with the given id and payload.
+    ///
+    /// # Arguments
+    /// * `id` - The id of the worker.
+    /// * `payload` - The payload for the worker.
+    ///
+    /// # Returns
+    /// A new BenchmarkWorker.
     pub fn new(id: usize, payload: &WorkerPayload) -> BenchmarkWorker {
         BenchmarkWorker {
             id,
@@ -84,20 +73,31 @@ impl BenchmarkWorker {
         }
     }
 
+    /// Runs the benchmark on the worker.
+    /// The benchmark is run on a separate thread owned by the worker.
+    ///
+    /// # Arguments
+    /// * `T` - The benchmark to run.
     pub fn run<T: Benchmark + 'static>(&mut self) {
         let payload = self.payload.as_ref().unwrap().clone();
+
+        // Take and join the thread if for some reason it is still working.
         if self.thread_handle.is_some() {
             let th = self.thread_handle.take();
             match th {
                 Some(thread_handle) => {
-                    thread_handle.join().unwrap();
+                    let _ = thread_handle.join();
+                    self.thread_handle = None;
                     self.working = false;
                 }
                 None => {}
             }
         }
+
         let docker = self.docker_manager.as_mut().unwrap().clone();
         self.working = true;
+
+        // Spawn a new thread to run the benchmark with the given payload.
         self.thread_handle = Some(std::thread::spawn(move || {
             T::run(docker, &payload);
         }));
@@ -105,16 +105,19 @@ impl BenchmarkWorker {
 }
 
 impl WorkerPayload {
+    /// Creates or gets the output directory for the current run.
     pub fn get_output_dir(benchmark_dir: &str, current_run: usize) -> String {
         let path = format!("{}/{}/output", benchmark_dir, current_run);
         exists_or_create_dir(&path).unwrap()
     }
 
+    /// Creates or gets the result directory for the current run.
     pub fn get_result_dir(benchmark_dir: &str, current_run: usize) -> String {
         let path = format!("{}/{}/results", benchmark_dir, current_run);
         exists_or_create_dir(&path).unwrap()
     }
 
+    /// Creates or gets a directory under the output directory for the current run.
     pub fn get_output_path_for(&self, file_path: &str) -> String {
         let path = format!(
             "{}/{}/output/{}",
@@ -123,6 +126,7 @@ impl WorkerPayload {
         exists_or_create_dir(&path).unwrap()
     }
 
+    /// Creates or gets a directory under the result directory for the current run.
     pub fn get_result_path_for(&self, file_path: &str) -> String {
         let path = format!(
             "{}/{}/results/{}",
@@ -132,25 +136,18 @@ impl WorkerPayload {
     }
 }
 
-impl Clone for Benchmarker {
-    fn clone(&self) -> Self {
-        Benchmarker {
-            context: self.context.clone(),
-            workers: Vec::new(),
-            current_worker_id: self.current_worker_id,
-        }
-    }
-}
-
 impl Benchmarker {
+    /// Creates a new Benchmarker with the given config.
+    ///
+    /// # Arguments
+    /// * `config` - The config for the benchmarker.
+    ///
+    /// # Returns
+    /// A new Benchmarker.
     pub fn new(config: &Config) -> Benchmarker {
-        let dir = PathBuf::from(config.benchmark_dir_path.clone());
-        if !dir.exists() {
-            fs::create_dir_all(dir).unwrap();
-        }
-
+        // Create the context for the benchmarker out of the config.
         let c = Context {
-            benchmark_dir: config.benchmark_dir_path.clone(),
+            benchmark_dir: exists_or_create_dir(&config.benchmark_dir_path).unwrap(),
             test_sets: Benchmarker::get_all_test_set_names(
                 config.local_test_image_dir_path.clone(),
             ),
@@ -164,13 +161,17 @@ impl Benchmarker {
             compare_to_commit: config.compare_to_commit.clone(),
         };
 
+        // Create a new Benchmarker with the given context.
         let mut b = Benchmarker {
             context: c,
             workers: Vec::new(),
             current_worker_id: 0,
         };
+
+        // Create workers for the benchmarker.
         let config = Config::default();
         for x in 0..b.context.num_workers {
+            // Initialize an empty payload for each worker.
             let payload = WorkerPayload {
                 context: b.context.clone(),
                 current_worker_id: x,
@@ -183,15 +184,25 @@ impl Benchmarker {
                 current_image_format: ImageFormat::Unsupported,
                 current_test_set: "".to_string(),
             };
+
+            // Create a new worker with the given worker index as id and payload.
             let mut worker = BenchmarkWorker::new(x, &payload);
+
+            // Create and setup a new DockerManager for the worker.
             let mut docker_manager = DockerManager::new(&config.docker_file_path, x);
             let _ = docker_manager.setup(worker.id).unwrap();
             worker.docker_manager = Some(docker_manager);
+
+            // Add the worker to the benchmarker.
             b.workers.push(worker);
         }
         b
     }
 
+    /// Gets the next worker id.
+    ///
+    /// # Returns
+    /// The next worker id to use and increments the current worker id.
     fn get_next_worker_id(&mut self) -> usize {
         let id = self.current_worker_id;
         self.current_worker_id += 1;
@@ -201,16 +212,39 @@ impl Benchmarker {
         id
     }
 
+    /// Creates or gets the output directory for the current run.
+    ///
+    /// # Arguments
+    /// * `benchmark_dir` - The benchmark directory.
+    /// * `current_run` - The current run number.
+    ///
+    /// # Returns
+    /// The path to the output directory.
     pub fn get_output_dir(benchmark_dir: &str, current_run: usize) -> String {
         let path = format!("{}/{}/output", benchmark_dir, current_run);
         exists_or_create_dir(&path).unwrap()
     }
 
+    /// Creates or gets the result directory for the current run.
+    ///
+    /// # Arguments
+    /// * `benchmark_dir` - The benchmark directory.
+    /// * `current_run` - The current run number.
+    ///
+    /// # Returns
+    /// The path to the result directory.
     pub fn get_result_dir(benchmark_dir: &str, current_run: usize) -> String {
         let path = format!("{}/{}/results", benchmark_dir, current_run);
         exists_or_create_dir(&path).unwrap()
     }
 
+    /// Creates or gets a directory under the output directory for the current run.
+    ///
+    /// # Arguments
+    /// * `file_path` - The file path to create or get a directory for.
+    ///
+    /// # Returns
+    /// The path to the directory.
     pub fn get_output_path_for(&self, file_path: &str) -> String {
         let path = format!(
             "{}/{}/output/{}",
@@ -219,6 +253,13 @@ impl Benchmarker {
         exists_or_create_dir(&path).unwrap()
     }
 
+    /// Creates or gets a directory under the result directory for the current run.
+    ///
+    /// # Arguments
+    /// * `file_path` - The file path to create or get a directory for.
+    ///
+    /// # Returns
+    /// The path to the directory.
     pub fn get_result_path_for(&self, file_path: &str) -> String {
         let path = format!(
             "{}/{}/results/{}",
@@ -227,52 +268,82 @@ impl Benchmarker {
         exists_or_create_dir(&path).unwrap()
     }
 
+    /// Gets the integer representing the current run of the benchmarker.
+    /// The current run number is based on the number-named run directories in the benchmark 
+    /// directory. The current run number is the highest number found in the directory plus one.
+    ///
+    /// # Arguments
+    /// * `benchmark_dir` - The benchmark directory.
+    ///
+    /// # Returns
+    /// The current run number.
     pub fn get_current_run(benchmark_dir: String) -> usize {
         let mut current_run = 0;
         let path = PathBuf::from(benchmark_dir.clone());
-        if path.exists() {
-            for entry in fs::read_dir(path).unwrap() {
-                let entry = entry.unwrap();
-                let path = entry.path();
-                let file_name = path.file_name().unwrap().to_str().unwrap();
-                // if file name is not a number, skip it, for temp/ directory in non-temp mode
-                if file_name.parse::<usize>().is_err() {
-                    continue;
-                }
-                let run = file_name.parse::<usize>().unwrap();
-                if run >= current_run {
-                    current_run = run + 1;
-                }
+        if !path.exists() {
+            return current_run;
+        }
+
+        // Get the highest number-named directory in the benchmark directory.
+        for entry in fs::read_dir(path).unwrap() {
+            let entry = entry.unwrap();
+            let path = entry.path();
+            let file_name = path.file_name().unwrap().to_str().unwrap();
+            // if file name is not a number, skip it, for temp/ directory in non-temp mode
+            if file_name.parse::<usize>().is_err() {
+                continue;
+            }
+            let run = file_name.parse::<usize>().unwrap();
+            if run >= current_run {
+                current_run = run + 1;
             }
         }
         current_run
     }
 
+    /// Gets all the test set names in the local test image directory.
+    /// The test set names are the names of the directories in the local test image directory.
+    ///
+    /// # Arguments
+    /// * `local_test_image_dir` - The local test image directory.
+    ///
+    /// # Returns
+    /// A vector of test set names.
     pub fn get_all_test_set_names(local_test_image_dir: String) -> Vec<String> {
         let mut test_sets = Vec::new();
         let path = PathBuf::from(local_test_image_dir.clone());
-        if path.exists() {
-            for entry in fs::read_dir(path).unwrap() {
-                let entry = entry.unwrap();
-                let path = entry.path();
-                let test_set_dir_name = path.file_name().unwrap().to_str().unwrap();
-                // if test_set_dir_name starts with a "." or is not a directory, skip it
-                if test_set_dir_name.starts_with(".") || !path.is_dir() {
-                    continue;
-                }
-                test_sets.push(test_set_dir_name.to_string());
+        if !path.exists() {
+            return test_sets;
+        }
+
+        // Add all the directories in the local test image directory to the test sets vector.
+        for entry in fs::read_dir(path).unwrap() {
+            let entry = entry.unwrap();
+            let path = entry.path();
+            let test_set_dir_name = path.file_name().unwrap().to_str().unwrap();
+            // if test_set_dir_name starts with a "." or is not a directory, skip it
+            if test_set_dir_name.starts_with(".") || !path.is_dir() {
+                continue;
             }
+            test_sets.push(test_set_dir_name.to_string());
         }
         test_sets
     }
 
+    /// Waits for the next worker to be available to run a benchmark and returns a mutable
+    /// reference to the worker.
+    ///
+    /// # Returns
+    /// A mutable reference to the next available worker.
     pub fn wait_for_available_worker(&mut self) -> &mut BenchmarkWorker {
         let id = self.get_next_worker_id();
         let worker = &mut self.workers[id] as &mut BenchmarkWorker;
+
+        // If the worker is working, wait for it to finish.
         if worker.working {
             if let Some(thread_handle) = worker.thread_handle.take() {
-                println!("Waiting for worker {} to finish", id);
-                thread_handle.join().unwrap();
+                let _ = thread_handle.join();
+                worker.thread_handle = None;
                 worker.working = false;
             } else {
                 panic!("Working worker thread handle is None");
@@ -281,23 +352,30 @@ impl Benchmarker {
         worker
     }
 
+    /// Gets the current worker and returns a mutable reference to it.
+    ///
+    /// # Returns
+    /// A mutable reference to the current worker.
     pub fn get_current_worker(&mut self) -> &mut BenchmarkWorker {
         let id = self.current_worker_id;
         &mut self.workers[id] as &mut BenchmarkWorker
     }
 
+    /// Waits on the current thread for all workers to finish working.
     pub fn wait_for_all_workers(&mut self) {
+        
+        // Wait for all workers to finish working and join their threads.
         for worker in &mut self.workers {
             if let Some(thread_handle) = worker.thread_handle.take() {
-                println!("Waiting for worker {} to finish", worker.id);
-                thread_handle.join().unwrap();
+                let _ = thread_handle.join();
+                worker.thread_handle = None;
                 worker.working = false;
             } else {
                 continue;
             }
         }
 
-        // Sanity check
+        // Sanity check to make sure no worker is still flagged as working.
         for worker in &self.workers {
             if worker.working {
                 panic!("Worker {} is still working", worker.id);
@@ -305,34 +383,30 @@ impl Benchmarker {
         }
     }
 
+    /// Runs a benchmark on the benchmarker.
+    /// The benchmark is run across all the workers in the benchmarker.
+    ///
+    /// # Arguments
+    /// * `T` - The benchmark to run.
     pub fn run_benchmark<T: Benchmark + 'static>(&mut self) {
-        // Set the current run of the benchmarker.
+        // Set the current run of the context.
         self.context.current_run = Benchmarker::get_current_run(self.context.benchmark_dir.clone());
 
-        // Get the libjxl commit for the benchmark.
+        // Get the libjxl commit for the benchmark or use the default commit (main).
         let libjxl_commit = self.context.libjxl_commit.clone();
         let mut commit = match libjxl_commit {
             Some(commit) => Some(commit),
             None => Some(DEFAULT_LIBJXL_COMMIT.to_string()),
         };
 
-        // Initialize the comparison CSVs vector.
+        // Initialize the benchmark comparison CSVs vector.
         let mut comparison_csvs = Vec::<String>::new();
 
         // Run the benchmark for each test set.
         let test_sets = self.context.test_sets.clone();
         for test_set in &test_sets {
             // Make sure test_set is a directory.
-            let path = PathBuf::from(format!(
-                "{}/{}",
-                self.context.local_test_image_dir, test_set
-            ));
-            if !path.is_dir() {
-                continue;
-            }
-
-            // Get the local test set path for the current test set.
-            let local_test_set_path = format!("{}/{}", self.context.local_test_image_dir, test_set);
+            let local_test_set_path = dir_exists(format!("{}/{}", self.context.local_test_image_dir, test_set).as_str()).unwrap();
 
             // Run the benchmark for each commit in the case of a comparison.
             while commit.is_some() {
@@ -359,7 +433,7 @@ impl Benchmarker {
                 for entry in fs::read_dir(local_test_set_path.clone()).unwrap() {
                     let entry = entry;
 
-                    // Check if entry is an image file.
+                    // Check if entry is a supported image file.
                     // Get extension of the file and check if it is supported.
                     if entry.as_ref().unwrap().path().is_dir() {
                         continue;
@@ -371,10 +445,10 @@ impl Benchmarker {
                         _ => {}
                     }
 
-                    // Get the next worker.
+                    // Wait for the next available worker.
                     let worker = self.wait_for_available_worker();
 
-                    // Clean the libjxl branch on the docker manager.
+                    // Clean the libjxl branch on the docker manager of the worker.
                     let _ = worker
                         .docker_manager
                         .as_ref()
@@ -401,6 +475,7 @@ impl Benchmarker {
                             .unwrap();
                     }
 
+                    // Re-build libjxl on the docker manager of the worker.
                     let _ = worker
                         .docker_manager
                         .as_ref()
@@ -447,14 +522,16 @@ impl Benchmarker {
                     worker.run::<T>();
                 }
 
-                // Add the result file to the comparison CSVs vector.
+                // Add the benchmark result file to the comparison CSVs vector.
                 let result_file = format!("{}/comparisons.csv", res_comp_path);
                 comparison_csvs.push(result_file.clone());
 
+                // If the benchmark is not a comparison, break here.
                 if !self.context.compare_to_local && self.context.compare_to_commit.is_none() {
                     break;
                 }
 
+                // Otherwise, set the commit to compare to.
                 let compare_to_commit = self.context.clone().compare_to_commit.clone();
                 if compare_to_commit.is_some() {
                     commit = Some(compare_to_commit.unwrap().clone());
@@ -469,15 +546,16 @@ impl Benchmarker {
                     };
                 }
             }
-            
+
+            // When all workers are finished, both commits have been benchmarked on all images.
             self.wait_for_all_workers();
 
+            // Compare the results of the benchmarks if applicable.
             if comparison_csvs.len() == 2 {
-                //println!("Comparing results");
-                //println!("Comparing {} to {}", comparison_csvs[0], comparison_csvs[1]);
+                // TODO: This isn't generalic to all benchmarks, but this doesn't matter if we only have one JPEG XL benchmark at this moment.
                 JXLCompressionBenchmark::compare_results(&comparison_csvs[0], &comparison_csvs[1]);
             } else if comparison_csvs.len() == 1 {
-                println!("Only 1 comparison CSV found");
+                continue;
             } else if comparison_csvs.len() > 2 {
                 panic!("More than 2 comparison CSVs found");
             } else {
@@ -486,6 +564,8 @@ impl Benchmarker {
         }
     }
 
+    /// Teardown the benchmarker.
+    /// Tears down all the docker managers of the workers.
     pub fn teardown(&mut self) {
         for worker in &mut self.workers {
             worker.docker_manager.as_ref().unwrap().teardown().unwrap();
@@ -493,46 +573,39 @@ impl Benchmarker {
     }
 }
 
-/*pub struct CollectImageMetadataBenchmark {}
-
-impl Benchmark for CollectImageMetadataBenchmark {
-    fn run(&self, image_name: &str, file_path: &str, output_path: String, result_path: String) {
-        drop(output_path);
-        println!(
-            "Running Collect Image Metadata Benchmark for image {}",
-            image_name
-        );
-        let image_reader = ImageReader::new(file_path.to_string());
-        let image_file_data = image_reader.file_data;
-        //        let output_path = format!("{}/{}.csv", output_path, image_name);
-        let result_file = format!("{}/{}.csv", result_path, image_name);
-
-        let csv_writer = ImageFileDataCSV::new();
-        csv_writer.write_csv_header(&result_file).unwrap();
-        csv_writer
-            .write_csv(&vec![image_file_data], &result_file)
-            .unwrap();
-    }
-}*/
-
 impl Benchmark for JXLCompressionBenchmark {
+    /// Runs the JPEG XL compression benchmark.
+    /// The benchmark will: 
+    ///   - compress images with the JPEG XL codec using the cjxl encoder tool.
+    ///   - test different distance and effort combinations.
+    ///   - compare the original and compressed images.
+    ///   - write the results to CSV files.
+    ///   - compare the results to the original images.
+    ///
+    /// # Arguments
+    /// * `docker_manager` - The DockerManager to use for running the benchmark, from the worker.
+    /// * `payload` - The payload for the benchmark, from the worker.
     fn run(docker_manager: DockerManager, payload: &WorkerPayload) {
-        // Get the libjxl commit for the benchmark.
+        // Get the libjxl commit for the benchmark or use the default commit (main).
         let commit = match &payload.context.libjxl_commit {
             Some(commit) => Some(commit.as_str()),
             None => Some(DEFAULT_LIBJXL_COMMIT),
         };
 
-        //println!("Commit: {}", commit.unwrap());
-
         // Get the current test set for the benchmark.
         let _test_set = payload.current_test_set.clone();
 
         // Set up output and result paths.
-        let _out_orig_path = payload.current_out_orig_path.clone();
+        let _out_orig_path = payload.current_out_orig_path.clone(); // Not used.
         let out_comp_path = payload.current_out_comp_path.clone();
         let res_orig_path = payload.current_res_orig_path.clone();
         let res_comp_path = payload.current_res_comp_path.clone();
+
+        // Check if the current image is a supported image file.
+        match ImageFormat::from_file_name(&payload.current_image_file_path) {
+            ImageFormat::Unsupported => panic!("Unsupported image format, this should not happen"),
+            _ => {}
+        }
 
         // Get the file path for the current image.
         let file_path = format!(
@@ -545,7 +618,10 @@ impl Benchmark for JXLCompressionBenchmark {
         );
 
         // Initialize an ImageReader to read the current image.
-        let image_reader = ImageReader::new(payload.current_image_file_path.clone().to_string(), commit.unwrap().to_string());
+        let image_reader = ImageReader::new(
+            payload.current_image_file_path.clone().to_string(),
+            commit.unwrap().to_string(),
+        );
 
         // Write the original image file data to a CSV file.
         let image_file_data = image_reader.file_data;
@@ -558,8 +634,8 @@ impl Benchmark for JXLCompressionBenchmark {
 
         // The JXL compression benchmark tests combinations of the following distances and efforts.
         // TODO: Make these configurable.
-        let distances = vec![0.0, 0.5, 1.0, 2.0, 3.0, 5.0, 10.0, 15.0, 25.0];
-        let efforts = (1..=9).collect::<Vec<u32>>();
+        let distances = vec![0.5, 1.0, 1.5, 3.0, 4.0, 6.0, 8.0, 10.0, 12.0, 14.0];
+        let efforts = (5..=9).collect::<Vec<u32>>();
 
         // Run the compression benchmark for each distance and effort combination.
         for distance in distances {
@@ -575,21 +651,14 @@ impl Benchmark for JXLCompressionBenchmark {
 
                 // Execute the cjxl encoder on the current image with the current distance and
                 // effort on the provided docker manager.
-                //println!(
-                //    "Running JXL Compression Benchmark for image {} at path {}",
-                //    comp_image_name.clone(), file_path.to_string().clone()
-                //);
-                let result = docker_manager
+                let _ = docker_manager
                     .execute_cjxl(
                         file_path.to_string().clone(),
                         comp_image_name.clone(),
                         distance,
                         effort,
                     )
-                    .unwrap();
-                //println!("Result: {:?}", result);
-
-                let _ = result.unwrap();
+                    .unwrap().unwrap();
 
                 // Retrieve the compressed image from the docker manager.
                 let src_path = format!("/temp/{}", comp_image_name);
@@ -599,8 +668,10 @@ impl Benchmark for JXLCompressionBenchmark {
                     .unwrap();
 
                 // Read the compressed image file data.
-                let image_reader =
-                    ImageReader::new(format!("{}/{}", out_comp_path, comp_image_name), commit.unwrap().to_string());
+                let image_reader = ImageReader::new(
+                    format!("{}/{}", out_comp_path, comp_image_name),
+                    commit.unwrap().to_string(),
+                );
 
                 // Write the compressed image file data to a CSV file.
                 let image_file_data = image_reader.file_data;
@@ -627,8 +698,13 @@ impl Benchmark for JXLCompressionBenchmark {
 }
 
 impl JXLCompressionBenchmark {
+    /// Compares JPEG XL benchmarking results from two different commits/versions of the codec.
+    /// The comparison results are written to a CSV file.
+    ///
+    /// # Arguments
+    /// * `results_1` - The path to the first run's results CSV file.
+    /// * `results_2` - The path to the second run's results CSV file.
     fn compare_results(results_1: &str, results_2: &str) {
-        //println!("Comparing results\n\n");
         // Initialize a csv handler for reading the comparison results.
         let csv_reader = ComparisonResultCSV::new();
 
@@ -636,11 +712,19 @@ impl JXLCompressionBenchmark {
         let comparison_results_1 = csv_reader.read_csv(results_1).unwrap();
         let comparison_results_2 = csv_reader.read_csv(results_2).unwrap();
 
+        // Sort the comparison results by image name, in case they are not already in the same
+        // order, so that they can be compared.
+        let mut comparison_results_1 = comparison_results_1.clone();
+        comparison_results_1.sort_by(|a, b| a.orig_image_name.cmp(&b.orig_image_name));
+        let mut comparison_results_2 = comparison_results_2.clone();
+        comparison_results_2.sort_by(|a, b| a.orig_image_name.cmp(&b.orig_image_name));
+
         let mut results = Vec::<ComparisonResultDiff>::new();
 
-        // Compare the comparison results.
+        // Compare each entry in the results CSVs.
         assert!(comparison_results_1.len() == comparison_results_2.len());
         for i in 0..comparison_results_1.len() {
+            // Assert that the right entries are being compared.
             assert!(
                 comparison_results_1[i].orig_image_name == comparison_results_2[i].orig_image_name
             );
@@ -650,6 +734,8 @@ impl JXLCompressionBenchmark {
             assert!(comparison_results_1[i].distance == comparison_results_2[i].distance);
             assert!(comparison_results_1[i].effort == comparison_results_2[i].effort);
 
+            // Calculate the differences between the comparison results as:
+            //  diff = result_2 - result_1
             let diff_orig_file_size = comparison_results_2[i].orig_file_size as f64
                 - comparison_results_1[i].orig_file_size as f64;
             let diff_comp_file_size = comparison_results_2[i].comp_file_size as f64
@@ -673,6 +759,7 @@ impl JXLCompressionBenchmark {
             let diff_ssimulacra2 =
                 comparison_results_2[i].ssimulacra2 - comparison_results_1[i].ssimulacra2;
 
+            // Create a comparison result difference struct and add it to the results vector.
             let result = ComparisonResultDiff {
                 orig_image_name: comparison_results_1[i].orig_image_name.clone(),
                 comp_image_name: comparison_results_1[i].comp_image_name.clone(),
@@ -695,6 +782,7 @@ impl JXLCompressionBenchmark {
             results.push(result);
         }
 
+        // Initialize a summary comparison result difference struct as zeros.
         let mut summary = ComparisonResultDiff {
             orig_image_name: "Summary".to_string(),
             comp_image_name: "Summary".to_string(),
@@ -715,6 +803,7 @@ impl JXLCompressionBenchmark {
             diff_ssimulacra2: 0.0,
         };
 
+        // Calculate the average differences between the comparison results.
         for result in &results {
             summary.diff_orig_file_size += result.diff_orig_file_size;
             summary.diff_comp_file_size += result.diff_comp_file_size;
@@ -745,12 +834,14 @@ impl JXLCompressionBenchmark {
         summary.diff_butteraugli_pnorm /= results.len() as f64;
         summary.diff_ssimulacra2 /= results.len() as f64;
 
+        // Initialize a CSV handler for the comparison result differences.
+        let csv_writer = ComparisonResultDiffCSV::new();
+
         // Write the comparison result differences to a CSV file.
         let result_file = format!(
             "{}/comparison_diffs.csv",
             PathBuf::from(results_1).parent().unwrap().to_str().unwrap()
         );
-        let csv_writer = ComparisonResultDiffCSV::new();
         csv_writer.write_csv_header(&result_file).unwrap();
         csv_writer.write_csv(&results, &result_file).unwrap();
 
@@ -763,6 +854,28 @@ impl JXLCompressionBenchmark {
         csv_writer.write_csv(&vec![summary], &summary_file).unwrap();
     }
 
+    /// Compares the compressed image to the original image and produces a result CSV file.
+    /// The comparison is done using the following metrics:
+    ///  Compression Rate:
+    ///   - Original file size to compressed file size ratio
+    ///   - Raw image size to compressed file size ratio
+    ///
+    ///  Image Quality:
+    ///   - Mean Squared Error (MSE)
+    ///   - Peak Signal-to-Noise Ratio (PSNR)
+    ///   - Structural Similarity Index (SSIM)
+    ///   - Multi-Scale Structural Similarity Index (MS-SSIM)
+    ///   - Butteraugli (also reports the Butteraugli p-norm)
+    ///   - SSIMULACRA2
+    ///
+    /// # Arguments
+    /// * `comp_image_data` - The compressed image file data.
+    /// * `out_comp_path` - The output compressed image path. (Not currently used)
+    /// * `res_orig_path` - The original image results path.
+    /// * `res_comp_path` - The compressed image results path.
+    /// * `docker_manager` - The DockerManager to use for running the comparison.
+    /// * `docker_input_path` - The input path for the Butteraugli and SSIMULACRA2 comparison.
+    /// * `docker_output_path` - The output path for the Butteraugli and SSIMULACRA2 comparison.
     fn compare_to_orig(
         comp_image_data: &ImageFileData,
         _out_comp_path: &str, // not currently used
@@ -776,7 +889,6 @@ impl JXLCompressionBenchmark {
         let csv_writer = ImageFileDataCSV::new();
 
         // Find the original image file data from the original results CSV file.
-        //println!("GUGHGH {}/results.csv", res_orig_path);
         let orig_entry = csv_writer
             .find_entry(
                 format!("{}/results.csv", res_orig_path).as_str(),
@@ -790,7 +902,7 @@ impl JXLCompressionBenchmark {
         let comp_file_size_ratio = file_size_ratio(orig_entry.file_size, comp_image_data.file_size);
 
         // Raw image size to compressed file size ratio
-        let raw_file_size_ratio = file_size_ratio(orig_entry.raw_size, comp_image_data.raw_size);
+        let raw_file_size_ratio = file_size_ratio(comp_image_data.raw_size, comp_image_data.file_size);
 
         // MSE
         let mse = calculate_mse(&orig_entry.file_path, &comp_image_data.file_path);
@@ -802,7 +914,7 @@ impl JXLCompressionBenchmark {
         let ssim = calculate_ssim(&orig_entry.file_path, &comp_image_data.file_path);
 
         // MS-SSIM
-        // TODO: Implement MS-SSIM
+        // TODO: Implement MS-SSIM.
 
         // Butteraugli
         let (butteraugli, pnorm) =
@@ -834,7 +946,6 @@ impl JXLCompressionBenchmark {
         };
 
         // The comparison result is stored in a CSV file under the result comparison directory.
-        //println!("BLARGH {}/comparisons.csv", res_comp_path);
         let result_file = format!("{}/comparisons.csv", res_comp_path,);
 
         // Initialize a CSV handler for the comparison result.
@@ -845,5 +956,29 @@ impl JXLCompressionBenchmark {
         csv_writer
             .write_csv(&vec![comparison_result], &result_file)
             .unwrap();
+    }
+}
+
+impl PartialEq for BenchmarkWorker {
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id
+    }
+}
+
+impl Eq for BenchmarkWorker {}
+
+impl std::hash::Hash for BenchmarkWorker {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.id.hash(state);
+    }
+}
+
+impl Clone for Benchmarker {
+    fn clone(&self) -> Self {
+        Benchmarker {
+            context: self.context.clone(),
+            workers: Vec::new(),
+            current_worker_id: self.current_worker_id,
+        }
     }
 }

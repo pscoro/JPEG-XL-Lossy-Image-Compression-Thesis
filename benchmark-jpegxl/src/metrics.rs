@@ -3,6 +3,14 @@ use crate::{docker_manager::DockerManager, image_reader::ImageReader};
 use std::io::BufRead;
 use std::process::Command;
 
+/// Calculate the ratio of the original file size to the compressed file size.
+///
+/// # Arguments
+/// * `orig` - The original file size.
+/// * `comp` - The compressed file size.
+///
+/// # Returns
+/// The ratio of the original file size to the compressed file size.
 pub fn file_size_ratio(orig: usize, comp: usize) -> f64 {
     if comp == 0 {
         return 0.0;
@@ -10,15 +18,42 @@ pub fn file_size_ratio(orig: usize, comp: usize) -> f64 {
     (orig as f64) / (comp as f64)
 }
 
+/// Calculate the mean squared error (MSE) between two images.
+/// Just a wrapper around the ImageReader method for a more consistent API.
+///
+/// # Arguments
+/// * `orig_image_path` - The path to the original image.
+/// * `comp_image_path` - The path to the compressed image.
+///
+/// # Returns
+/// The mean squared error between the two images.
 pub fn calculate_mse(orig_image_path: &String, comp_image_path: &String) -> f64 {
     ImageReader::calculate_mse(orig_image_path, comp_image_path)
 }
 
+/// Calculate the peak signal-to-noise ratio (PSNR) between two images.
+/// Just a wrapper around the ImageReader method for a more consistent API.
+///
+/// # Arguments
+/// * `orig_image_path` - The path to the original image.
+/// * `comp_image_path` - The path to the compressed image.
+///
+/// # Returns
+/// The peak signal-to-noise ratio between the two images.
 pub fn calculate_psnr(orig_image_path: &String, comp_image_path: &String, max_value: f64) -> f64 {
     let mse = calculate_mse(orig_image_path, comp_image_path);
     ImageReader::calculate_psnr(mse, max_value)
 }
 
+/// Calculate the structural similarity index (SSIM) between two images.
+/// Uses the ImageMagick `compare` command locally with the SSIM metric.
+///
+/// # Arguments
+/// * `orig_image_path` - The path to the original image.
+/// * `comp_image_path` - The path to the compressed image.
+///
+/// # Returns
+/// The structural similarity index between the two images.
 pub fn calculate_ssim(orig_image_path: &String, comp_image_path: &String) -> f64 {
     // $ magick compare -metric SSIM orig.png comp.png diff.png
     let result = Command::new("magick")
@@ -29,7 +64,7 @@ pub fn calculate_ssim(orig_image_path: &String, comp_image_path: &String) -> f64
         .arg(comp_image_path)
         .arg("null:")
         .output();
-    println!("Result: {:?}", result);
+
     result
         .unwrap()
         .stderr
@@ -41,6 +76,16 @@ pub fn calculate_ssim(orig_image_path: &String, comp_image_path: &String) -> f64
         .unwrap()
 }
 
+/// Calculate the Butteraugli perceptual distance between two images.
+/// Uses the libjxl Butteraugli tool in a Docker container to calculate the distance.
+///
+/// # Arguments
+/// * `docker_input_path` - The path to the original image in the Docker container.
+/// * `docker_output_path` - The path to the compressed image in the Docker container.
+/// * `docker_manager` - The DockerManager instance to execute the Butteraugli command.
+///
+/// # Returns
+/// The Butteraugli perceptual distance between the two images and the p-norm value, as a tuple.
 pub fn calculate_butteraugli(
     docker_input_path: &str,
     docker_output_path: &str,
@@ -50,21 +95,34 @@ pub fn calculate_butteraugli(
         docker_input_path.to_string().clone(),
         docker_output_path.to_string().clone(),
     );
-    let output = result.unwrap().unwrap_err();
-    let butteraugli = output.lines().next().unwrap().parse::<f64>().unwrap();
+    let result = result.unwrap();
+    let output = result.clone().unwrap_err();
+
+    // Butteraugli may fail because of libpng warning: iCCP: known incorrect sRGB profile
+    let butteraugli = output.lines().next().unwrap().parse::<f64>().unwrap_or(0.0);
+
     let pnorm = output
         .lines()
         .last()
         .unwrap()
         .split_whitespace()
         .last()
-        .unwrap()
-        .parse::<f64>()
         .unwrap();
+    let pnorm = pnorm.parse::<f64>().unwrap_or(0.0);
 
     (butteraugli, pnorm)
 }
 
+/// Calculate the SSIMULACRA2 perceptual distance between two images.
+/// Uses the libjxl SSIMULACRA2 tool in a Docker container to calculate the distance.
+///
+/// # Arguments
+/// * `docker_input_path` - The path to the original image in the Docker container.
+/// * `docker_output_path` - The path to the compressed image in the Docker container.
+/// * `docker_manager` - The DockerManager instance to execute the SSIMULACRA2 command.
+///
+/// # Returns
+/// The SSIMULACRA2 perceptual distance between the two images.
 pub fn calculate_ssimulacra2(
     docker_input_path: &str,
     docker_output_path: &str,

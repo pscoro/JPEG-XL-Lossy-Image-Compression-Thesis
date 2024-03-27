@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::error::Error;
 use std::process::Command;
 
+/// A struct that manages the docker container for a benchmark worker.
 #[derive(Debug, Clone)]
 pub struct DockerManager {
     pub id: usize,
@@ -12,10 +13,20 @@ pub struct DockerManager {
 }
 
 impl DockerManager {
+    /// The name of the docker image and the base name of the docker container.
     pub const IMAGE_NAME: &'static str = "benchmark-libjxl-image";
     pub const CONTAINER_NAME: &'static str = "benchmark-libjxl-container";
 
+    /// Creates a new Docker manager instance.
+    ///
+    /// # Arguments
+    /// * `dockerfile` - The path to the Dockerfile to use for the container.
+    /// * `id` - The ID of the worker.
+    ///
+    /// # Returns
+    /// * `DockerManager` - The new Docker manager instance.
     pub fn new(dockerfile: &str, id: usize) -> DockerManager {
+        // The id is appended to the container name to ensure uniqueness.
         DockerManager {
             id,
             dockerfile: String::from(dockerfile),
@@ -29,6 +40,14 @@ impl DockerManager {
         }
     }
 
+    /// Executes the given command on the given local machine and returns the output.
+    ///
+    /// # Arguments
+    /// * `command` - The command to execute.
+    ///
+    /// # Returns
+    /// * `Result<String, Error>` - The stdout of the command or an error with the stderr if the 
+    /// command fails.
     fn execute_command(&self, command: &mut Command) -> Result<String, Box<dyn Error>> {
         let output = command
             .output()
@@ -41,6 +60,15 @@ impl DockerManager {
         }
     }
 
+    /// Copies a file from the docker container to the local machine.
+    ///
+    /// # Arguments
+    /// * `file_path` - The path to the file in the docker container.
+    /// * `dest_path` - The path to copy the file to on the local machine.
+    ///
+    /// # Returns
+    /// * `Result<String, Error>` - The stdout of the command or an error with the stderr if the 
+    /// command fails.
     pub fn retrieve_file(
         &self,
         file_path: String,
@@ -58,6 +86,17 @@ impl DockerManager {
         self.execute_command(&mut command)
     }
 
+    /// Executes the cjxl encoding tool in the docker container.
+    ///
+    /// # Arguments
+    /// * `input_file` - The path to the input image file to encode.
+    /// * `output_file` - The name of the output file to create (in the docker container).
+    /// * `distance` - The cjxl Butteraugli distance (quality) to use for the encoding.
+    /// * `effort` - The cjxl effort level to use for the encoding.
+    ///
+    /// # Returns
+    /// * `Result<Result<String, String>, Error>` - The result of the command as a (stdout, stderr)
+    /// tuple or an error if there was an issue executing the command.
     pub fn execute_cjxl(
         &self,
         input_file: String,
@@ -65,6 +104,7 @@ impl DockerManager {
         distance: f64,
         effort: u32,
     ) -> Result<Result<String, String>, Box<dyn Error>> {
+        // Create the output directory if it doesn't exist.
         _ = self.execute_in_container(
             "mkdir",
             vec![
@@ -81,6 +121,8 @@ impl DockerManager {
                 .as_str(),
             ],
         )?;
+        
+        // Add the distance and effort flags to the command.
         let distance = format!("--distance={}", distance);
         let effort = format!("--effort={}", effort);
         let args = vec![
@@ -90,11 +132,19 @@ impl DockerManager {
             effort.as_str(),
         ];
 
-        //println!("Executing cjxl");
-        //println!("Args: {:?}", args);
+        // Execute the cjxl command in the docker container.
         self.execute_in_container("/libjxl/build/tools/cjxl", args)
     }
 
+    /// Executes the JPEG XL SSIMULACRA2 benchmarking tool in the docker container.
+    ///
+    /// # Arguments
+    /// * `orig_file` - The path to the original image file.
+    /// * `comp_file` - The path to the compressed image file.
+    ///
+    /// # Returns
+    /// * `Result<Result<String, String>, Error>` - The result of the command as a (stdout, stderr)
+    /// tuple or an error if there was an issue executing the command.
     pub fn execute_ssimulacra2(
         &self,
         orig_file: String,
@@ -105,6 +155,15 @@ impl DockerManager {
         self.execute_in_container("../libjxl/build/tools/ssimulacra2", args)
     }
 
+    /// Executes the libjxl Butteraugli benchmarking tool in the docker container.
+    ///
+    /// # Arguments
+    /// * `orig_file` - The path to the original image file.
+    /// * `comp_file` - The path to the compressed image file.
+    ///
+    /// # Returns
+    /// * `Result<Result<String, String>, Error>` - The result of the command as a (stdout, stderr)
+    /// tuple or an error if there was an issue executing the command.
     pub fn execute_butteraugli(
         &self,
         orig_file: String,
@@ -112,12 +171,14 @@ impl DockerManager {
     ) -> Result<Result<String, String>, Box<dyn Error>> {
         let args = vec![orig_file.as_str(), comp_file.as_str()];
 
-        //println!("Executing butteraugli");
-        //println!("Args: {:?}", args);
         self.execute_in_container("/libjxl/build/tools/butteraugli_main", args)
     }
 
     /// Sets up a docker container for a benchmark worker.
+    ///
+    /// # Arguments
+    /// * `worker_id` - The ID of the worker.
+    ///
     /// # Returns
     /// * `Result<(), Error>` - An error if the setup fails.
     pub fn setup(&mut self, worker_id: usize) -> Result<(), Box<dyn Error>> {
@@ -137,34 +198,11 @@ impl DockerManager {
             }
         }
 
-        // Check if container is running.
-        /*        // If it is, stop it.
-                println!("Checking if docker container is running...");
-                let output = self.execute_command(
-                    Command::new("docker")
-                        .arg("ps")
-                        .arg("--filter")
-                        .arg(format!("name={}", self.container_name.as_ref().unwrap()))
-                        .arg("--format")
-                        .arg("{{.Names}}")
-                )?;
-                if output.len() > 0 {
-                    println!("Stopping docker container...");
-                    self.execute_command(
-                        Command::new("docker")
-                            .arg("stop")
-                            .arg(self.container_name.as_ref().unwrap())
-                    )?;
-                }
-        */
         let worker_container_name = self.container_name.as_ref().unwrap();
         self.containers
             .insert(worker_id, worker_container_name.clone());
+
         // Start the container.
-        println!(
-            "Starting docker container... {}",
-            worker_container_name.clone()
-        );
         self.execute_command(
             Command::new("docker")
                 .arg("run")
@@ -180,11 +218,12 @@ impl DockerManager {
     /// Executes the given command in the docker container.
     ///
     /// # Arguments
-    /// * `command` - The command to execute in the docker container.
+    /// * `subcommand` - The subcommand to execute with `docker exec`.
     /// * `args` - The arguments to pass to the command.
     ///
     /// # Returns
-    /// * `Result<Result<String, String>, Error>` - The result of the command.
+    /// * `Result<Result<String, String>, Error>` - The result of the command as a (stdout, stderr)
+    /// tuple or an error if there was an issue executing the command.
     pub fn execute_in_container(
         &self,
         subcommand: &str,
@@ -200,6 +239,7 @@ impl DockerManager {
 
         let output = command.output()?;
 
+        // Convert the output to a string.
         let stdout = String::from_utf8_lossy(&output.stdout).to_string();
         let stderr = String::from_utf8_lossy(&output.stderr).to_string();
 
@@ -253,6 +293,13 @@ impl DockerManager {
         Ok(())
     }
 
+    /// Changes the libjxl commit in the docker container.
+    ///
+    /// # Arguments
+    /// * `commit` - The commit hash or branch name to checkout in the libjxl repository.
+    ///
+    /// # Returns
+    /// * `Result<String, Error>` - The output of the command or an error if the command fails.
     pub fn change_libjxl_commit(&self, commit: &str) -> Result<String, Box<dyn Error>> {
         let mut command = Command::new("docker");
         command.arg("exec");
@@ -267,6 +314,13 @@ impl DockerManager {
         self.execute_command(&mut command)
     }
 
+    /// Applies a local git diff to the libjxl repository in the docker container.
+    ///
+    /// # Arguments
+    /// * `diff` - The diff to apply to the libjxl repository.
+    ///
+    /// # Returns
+    /// * `Result<String, Error>` - The output of the command or an error if the command fails.
     pub fn apply_diff(&self, diff: &str) -> Result<String, Box<dyn Error>> {
         let mut command = Command::new("docker");
         command.arg("exec");
@@ -278,47 +332,43 @@ impl DockerManager {
         self.execute_command(&mut command)
     }
 
+    /// Applies libjxl changes from the local machine to the libjxl repository in the docker
+    /// container using a git diff. The local changes are stored in a file called `local.diff` in
+    /// the current directory.
+    ///
+    /// # Returns
+    /// * `Result<String, Error>` - The output of the command or an error if the command fails.
     pub fn apply_local_as_diff(&self) -> Result<String, Box<dyn Error>> {
         // Copy diff to docker container
-        let _ = self.execute_command(
-            Command::new("docker")
-                .arg("cp")
-                .arg("local.diff")
-                .arg(format!(
-                    "{}:/libjxl/local.diff",
-                    self.container_name.as_ref().unwrap()
-                )),
-        );
+        let _ = self.execute_command(Command::new("docker").arg("cp").arg("local.diff").arg(
+            format!(
+                "{}:/libjxl/local.diff",
+                self.container_name.as_ref().unwrap()
+            ),
+        ));
 
         let _ = self.apply_diff("local.diff");
-/*
-        // Remove local.diff
-        let _ = self.execute_command(
-            Command::new("docker")
-                .arg("exec")
-                .arg(self.container_name.as_ref().unwrap())
-                .arg("rm")
-                .arg("/libjxl/local.diff"),
-        );
-
-        let mut command = Command::new("rm");
-        command.arg("local.diff");
-        self.execute_command(&mut command)
-*/
         Ok(String::from("Applied local folder as diff"))
     }
 
+    /// Builds the libjxl library in the docker container.
+    /// This should be run after changing the libjxl commit or applying a diff.
+    ///
+    /// # Returns
+    /// * `Result<String, Error>` - The output of the command or an error if the command fails.
     pub fn build_libjxl(&self) -> Result<String, Box<dyn Error>> {
         let mut command = Command::new("docker");
         command.arg("exec");
         command.arg(self.container_name.as_ref().unwrap());
         command.arg("bash");
         command.arg("-c");
-        command.arg("cd /libjxl && ./ci.sh opt; exit 0 && cd -");
+        command.arg("cd /libjxl && SKIP_TEST=1 ./ci.sh opt; exit 0 && cd -");
 
         self.execute_command(&mut command)
     }
 
+    /// Cleans the libjxl repository in the docker container.
+    /// This should be run before changing the libjxl commit or applying a diff for a clean slate.
     pub fn clean_libjxl(&self) -> Result<String, Box<dyn Error>> {
         let mut command = Command::new("docker");
         command.arg("exec");

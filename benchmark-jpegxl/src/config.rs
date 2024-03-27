@@ -1,3 +1,4 @@
+/// Configuration for the benchmarking tool.
 pub struct Config {
     pub benchmark_dir_path: String,
     pub docker_file_path: String,
@@ -18,7 +19,7 @@ impl Default for Config {
             docker_file_path: "./Dockerfile".to_string(),
             local_test_image_dir_path: "./test_images".to_string(),
             docker_test_image_dir_path: "/test_images".to_string(),
-            num_workers: 8,
+            num_workers: 6,
 
             use_temp_dir: false,
             libjxl_commit: None,
