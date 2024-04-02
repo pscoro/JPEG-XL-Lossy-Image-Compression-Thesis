@@ -1,0 +1,421 @@
+diff --git a/lib/jxl/enc_ac_strategy.cc b/lib/jxl/enc_ac_strategy.cc
+index 4aafd7a5..e84eefff 100644
+--- a/lib/jxl/enc_ac_strategy.cc
++++ b/lib/jxl/enc_ac_strategy.cc
+@@ -23,6 +23,7 @@
+ #include "lib/jxl/base/fast_math-inl.h"
+ #include "lib/jxl/base/status.h"
+ #include "lib/jxl/dec_transforms-inl.h"
++#include "lib/jxl/dec_xyb-inl.h"
+ #include "lib/jxl/enc_aux_out.h"
+ #include "lib/jxl/enc_debug_image.h"
+ #include "lib/jxl/enc_params.h"
+@@ -345,9 +346,229 @@ bool MultiBlockTransformCrossesVerticalBoundary(
+   return false;
+ }
+ 
++size_t CalculateNumZeroCrossings(const AcStrategy& acs, size_t x, size_t y,
++                                 size_t xsize, size_t ysize,
++			         size_t bx, size_t by,
++                                 const ACSConfig& config, float threshold,
++                                 float* laplacian) {
++  assert(xsize + bx <= 8 && ysize + by <= 8);
++
++  // Horizontal
++  size_t num_h_crossings = 0;
++  for (size_t i = by; i < ysize + by; i++) {
++    bool in_edge = false;
++    for (size_t j = bx; j < xsize + bx; j++) {
++      if (!in_edge && laplacian[(i - by) * xsize + (j - bx)] > threshold) {
++        num_h_crossings++;
++	in_edge = true;
++      } else if (in_edge && laplacian[(i - by) * xsize + (j - bx)] <= threshold) {
++        in_edge = false;
++      }
++    }
++  }
++  float avg_h_crossings = num_h_crossings / (float) ysize;
++
++  // Vertical
++  size_t num_v_crossings = 0;
++  for (size_t i = bx; i < xsize + bx; i++) {
++    bool in_edge = false;
++    for (size_t j = by; j < ysize + by; j++) {
++      if (!in_edge && laplacian[(j - by) * xsize + (i - bx)] > threshold) {
++        num_v_crossings++;
++	in_edge = true;
++      } else if (in_edge && laplacian[(j - by) * xsize + (i - bx)] <= threshold) {
++        in_edge = false;
++      }
++    }
++  }
++  float avg_v_crossings = num_v_crossings / (float) xsize;
++
++  return avg_h_crossings + avg_v_crossings;
++}
++
++void CalculateLaplacianFilter(const AcStrategy& acs, size_t x, size_t y,
++                              size_t xsize, size_t ysize,
++                              size_t bx, size_t by,
++                              const ACSConfig& config, float* block_out) {
++  assert(xsize + bx <= 8 && ysize + by <= 8);
++  // apply laplacian filter to block and store result in block_out
++  float mask[3][3] = {{0, -1, 0}, {-1, -4, -1}, {0, -1, 0}};
++
++  size_t c = 1;  // luminance channel in XYB.
++  for (size_t i = by; i < ysize + by; i++) {
++    for (size_t j = bx; j < xsize + bx; j++) {
++      float sum = 0;
++      for (int k = -1; k < 2; k++) {
++        for (int l = -1; l < 2; l++) {
++          size_t curr_y = i + k;
++          size_t curr_x = j + l;
++          if (x + curr_x >= 0 && x + curr_x < config.src_stride && y + curr_y >= 0 && y + curr_y < config.src_ysize) {
++            sum += config.Pixel(c, x + curr_x, y + curr_y) * mask[k + 1][l + 1];
++          }
++        }
++      }
++      block_out[(i - by) * xsize + (j - bx)] = sum;
++    }
++  }
++}
++
++float CalculateSumModifiedLaplacian(const AcStrategy& acs, size_t x, size_t y,
++                                    size_t xsize, size_t ysize,
++			            size_t bx, size_t by,
++                                    const ACSConfig& config) {
++  assert(xsize + bx <= 8 && ysize + by <= 8);
++  float sum = 0;
++  for (size_t i = by; i < ysize + by; i++) {
++    for (size_t j = bx; j < xsize + bx; j++) {
++      if (x + j - 1 < 0 || x + j + 1 >= config.src_stride || y + i - 1 < 0 || y + i + 1 >= config.src_ysize) {
++        continue;
++      }
++      float pixel = config.Pixel(1, x + j, y + i);
++      float pixel_left = config.Pixel(1, x + j - 1, y + i);
++      float pixel_right = config.Pixel(1, x + j + 1, y + i);
++      float pixel_up = config.Pixel(1, x + j, y + i - 1);
++      float pixel_down = config.Pixel(1, x + j, y + i + 1);
++
++      sum += abs(2 * pixel - pixel_left - pixel_right) +
++             abs(2 * pixel - pixel_up - pixel_down);
++    }
++  }
++  return sum;
++}
++
++float CalculateColorfulness(const AcStrategy& acs, size_t x, size_t y,
++                            size_t xsize, size_t ysize,
++			    size_t bx, size_t by,
++                            const ACSConfig& config) {
++  assert(xsize + bx <= 8 && ysize + by <= 8);
++  // Mean X and B values
++  float mean_x = 0;
++  for (size_t i = by; i < ysize + by; i++) {
++    for (size_t j = bx; j < xsize + bx; j++) {
++      mean_x += config.Pixel(0, x + j, y + i);
++    }
++  }
++  mean_x /= (xsize * ysize);
++
++  float mean_b = 0;
++  for (size_t i = by; i < ysize + by; i++) {
++    for (size_t j = bx; j < xsize + bx; j++) {
++      mean_b += config.Pixel(2, x + j, y + i);
++    }
++  }
++  mean_b /= (xsize * ysize);
++
++  // Variance of X and B values
++  float var_x = 0;
++  for (size_t i = by; i < ysize + by; i++) {
++    for (size_t j = bx; j < xsize + bx; j++) {
++      float diff = config.Pixel(0, x + j, y + i) - mean_x;
++      var_x += diff * diff;
++    }
++  }
++  var_x /= (xsize * ysize);
++
++  float var_b = 0;
++  for (size_t i = by; i < ysize + by; i++) {
++    for (size_t j = bx; j < xsize + bx; j++) {
++      float diff = config.Pixel(2, x + j, y + i) - mean_b;
++      var_b += diff * diff;
++    }
++  }
++  var_b /= (xsize * ysize);
++
++  float colorfulness =
++      sqrt(var_x + var_b) + 0.3 * sqrt(mean_x * mean_x + mean_b * mean_b);
++  return colorfulness;
++}
++
++float CalculateHomogeneity(const AcStrategy& acs, size_t x, size_t y,
++                           size_t xsize, size_t ysize, size_t bx, size_t by,
++                           float butteraugli_target, const ACSConfig& config) {
++  assert(xsize + bx <= 8 && ysize + by <= 8);
++  assert((1 << acs.log2_covered_blocks()) * kDCTBlockSize == 64 &&
++         "We only calculate homogeneity for the subblocks of DCT8X8");
++
++  float* laplacian = static_cast<float*>(malloc(ysize * xsize * sizeof(float)));
++  CalculateLaplacianFilter(acs, x, y, xsize, ysize, bx, by, config, laplacian);
++
++  float laplacian_edge_threshold = 0.25;
++  if (butteraugli_target > 10.0) {
++    laplacian_edge_threshold = 0.40;
++  } else if (butteraugli_target <= 2.0) {
++    laplacian_edge_threshold = 0.15;
++  }
++
++  size_t num_crossings =
++      CalculateNumZeroCrossings(acs, x, y, xsize, ysize, bx, by, config, laplacian_edge_threshold, laplacian);
++
++  float sum_modified_laplacian =
++      CalculateSumModifiedLaplacian(acs, x, y, xsize, ysize, bx, by, config);
++
++  float colorfulness = CalculateColorfulness(acs, x, y, xsize, ysize, bx, by, config);
++
++  free(laplacian);
++
++  return (num_crossings + sum_modified_laplacian + colorfulness);
++}
++
++void CalculateHomogeneitySimilarityIndices(const AcStrategy& acs, size_t x, size_t y,
++                             float butteraugli_target,
++                             const ACSConfig& config, float* r_h, float* r_v, float* r_d) {
++  assert(acs.Strategy() == AcStrategy::Type::DCT &&  
++      "We only calculate homogeneity for the subblocks of DCT8X8");
++  float h1 = CalculateHomogeneity(acs, x, y, 8, 4, 0, 0, butteraugli_target, config);
++  float h2 = CalculateHomogeneity(acs, x, y, 8, 4, 0, 4, butteraugli_target, config);
++
++  float h_max = std::max(h1, h2);
++  float h_min = std::min(h1, h2);
++
++  float v1 = CalculateHomogeneity(acs, x, y, 4, 8, 0, 0, butteraugli_target, config);
++  float v2 = CalculateHomogeneity(acs, x, y, 4, 8, 4, 0, butteraugli_target, config);
++
++  float v_max = std::max(v1, v2);
++  float v_min = std::min(v1, v2);
++
++  float d1 = (CalculateHomogeneity(acs, x, y, 4, 4, 0, 0, butteraugli_target, config) +
++              CalculateHomogeneity(acs, x, y, 4, 4, 4, 4, butteraugli_target, config) / 2);
++  float d2 = (CalculateHomogeneity(acs, x, y, 4, 4, 0, 4, butteraugli_target, config) +
++              CalculateHomogeneity(acs, x, y, 4, 4, 4, 0, butteraugli_target, config) / 2);
++
++  float d_max = std::max(d1, d2);
++  float d_min = std::min(d1, d2);
++
++  *r_h = h_max / h_min;
++  *r_v = v_max / v_min;
++  *r_d = d_max / d_min;
++}
++
++uint8_t HomogeneityPartition(const AcStrategy& acs, size_t x, size_t y,
++                             int encoding_speed_tier, float butteraugli_target,
++                             const ACSConfig& config) {
++  float r_h, r_v, r_d;
++  CalculateHomogeneitySimilarityIndices(acs, x, y, butteraugli_target, config, &r_h, &r_v, &r_d);
++
++  float threshold = 1.60;
++  if (butteraugli_target > 10.0) {
++    threshold = 1.80;
++  } else if (butteraugli_target <= 3.0) {
++    threshold = 1.50;
++  }
++
++  if (r_d > threshold) {
++    return AcStrategy::Type::DCT4X4;
++  } else if (r_h > r_v && r_h > threshold) {
++    return AcStrategy::Type::DCT8X4;
++  } else if (r_v > r_h && r_v > threshold) {
++    return AcStrategy::Type::DCT4X8;
++  } else {
++    return AcStrategy::Type::DCT;
++  }
++}
++
+ float EstimateEntropy(const AcStrategy& acs, float entropy_mul, size_t x,
+                       size_t y, const ACSConfig& config,
+-                      const float* JXL_RESTRICT cmap_factors, float* block,
++                      const float* JXL_RESTRICT cmap_factors, float butteraugli_target, float* block,
+                       float* full_scratch_space, uint32_t* quantized) {
+   float* mem = full_scratch_space;
+   float* scratch_space = full_scratch_space + AcStrategy::kMaxCoeffArea;
+@@ -473,6 +694,12 @@ float EstimateEntropy(const AcStrategy& acs, float entropy_mul, size_t x,
+       (num_blocks * kDCTBlockSize) / quant_norm16;
+   float ret = entropy * entropy_mul;
+   ret += config.info_loss_multiplier * loss_scalar;
++  float r_h, r_v, r_d;
++  CalculateHomogeneitySimilarityIndices(acs, x, y,
++                             butteraugli_target,
++                             config, &r_h, &r_v, &r_d);
++  float avg_r = (r_h + r_v + r_d) / 3;
++  ret = ret * 0.8 * avg_r;
+   return ret;
+ }
+ 
+@@ -566,7 +793,7 @@ uint8_t FindBest8x8Transform(size_t x, size_t y, int encoding_speed_tier,
+       entropy_mul += kAvoidEntropyOfTransforms * mul;
+     }
+     float entropy =
+-        EstimateEntropy(acs, entropy_mul, x, y, config, cmap_factors, block,
++        EstimateEntropy(acs, entropy_mul, x, y, config, cmap_factors, butteraugli_target, block,
+                         scratch_space, quantized);
+     if (entropy < best) {
+       best_tx = tx.type;
+@@ -574,6 +801,14 @@ uint8_t FindBest8x8Transform(size_t x, size_t y, int encoding_speed_tier,
+     }
+   }
+   *entropy_out = best;
++  /*
++  if (best_tx == AcStrategy::Type::DCT) {
++    best_tx = HomogeneityPartition(AcStrategy::FromRawStrategy(best_tx), x, y,
++                                    encoding_speed_tier, butteraugli_target,
++                                    config);
++  }
++  */
++
+   return best_tx;
+ }
+ 
+@@ -586,7 +821,7 @@ void TryMergeAcs(AcStrategy::Type acs_raw, size_t bx, size_t by, size_t cx,
+                  AcStrategyImage* JXL_RESTRICT ac_strategy,
+                  const float entropy_mul, const uint8_t candidate_priority,
+                  uint8_t* priority, float* JXL_RESTRICT entropy_estimate,
+-                 float* block, float* scratch_space, uint32_t* quantized) {
++                 float butteraugli_target, float* block, float* scratch_space, uint32_t* quantized) {
+   AcStrategy acs = AcStrategy::FromRawStrategy(acs_raw);
+   float entropy_current = 0;
+   for (size_t iy = 0; iy < acs.covered_blocks_y(); ++iy) {
+@@ -602,7 +837,7 @@ void TryMergeAcs(AcStrategy::Type acs_raw, size_t bx, size_t by, size_t cx,
+   }
+   float entropy_candidate =
+       EstimateEntropy(acs, entropy_mul, (bx + cx) * 8, (by + cy) * 8, config,
+-                      cmap_factors, block, scratch_space, quantized);
++                      cmap_factors, butteraugli_target, block, scratch_space, quantized);
+   if (entropy_candidate >= entropy_current) return;
+   // Accept the candidate.
+   for (size_t iy = 0; iy < acs.covered_blocks_y(); iy++) {
+@@ -669,7 +904,7 @@ void FindBestFirstLevelDivisionForSquare(
+     size_t cy, const ACSConfig& config, const float* JXL_RESTRICT cmap_factors,
+     AcStrategyImage* JXL_RESTRICT ac_strategy, const float entropy_mul_JXK,
+     const float entropy_mul_JXJ, float* JXL_RESTRICT entropy_estimate,
+-    float* block, float* scratch_space, uint32_t* quantized) {
++    float butteraugli_target, float* block, float* scratch_space, uint32_t* quantized) {
+   // We denote J for the larger dimension here, and K for the smaller.
+   // For example, for 32x32 block splitting, J would be 32, K 16.
+   const size_t blocks_half = blocks / 2;
+@@ -720,12 +955,12 @@ void FindBestFirstLevelDivisionForSquare(
+     if (row0[bx + cx + 0].RawStrategy() != acs_rawJXK) {
+       entropy_JXK_left = EstimateEntropy(
+           acsJXK, entropy_mul_JXK, (bx + cx + 0) * 8, (by + cy + 0) * 8, config,
+-          cmap_factors, block, scratch_space, quantized);
++          cmap_factors, butteraugli_target, block, scratch_space, quantized);
+     }
+     if (row0[bx + cx + blocks_half].RawStrategy() != acs_rawJXK) {
+       entropy_JXK_right =
+           EstimateEntropy(acsJXK, entropy_mul_JXK, (bx + cx + blocks_half) * 8,
+-                          (by + cy + 0) * 8, config, cmap_factors, block,
++                          (by + cy + 0) * 8, config, cmap_factors, butteraugli_target, block,
+                           scratch_space, quantized);
+     }
+   }
+@@ -733,13 +968,13 @@ void FindBestFirstLevelDivisionForSquare(
+     if (row0[bx + cx].RawStrategy() != acs_rawKXJ) {
+       entropy_KXJ_top = EstimateEntropy(
+           acsKXJ, entropy_mul_JXK, (bx + cx + 0) * 8, (by + cy + 0) * 8, config,
+-          cmap_factors, block, scratch_space, quantized);
++          cmap_factors, butteraugli_target, block, scratch_space, quantized);
+     }
+     if (row1[bx + cx].RawStrategy() != acs_rawKXJ) {
+       entropy_KXJ_bottom =
+           EstimateEntropy(acsKXJ, entropy_mul_JXK, (bx + cx + 0) * 8,
+                           (by + cy + blocks_half) * 8, config, cmap_factors,
+-                          block, scratch_space, quantized);
++                          butteraugli_target, block, scratch_space, quantized);
+     }
+   }
+   if (allow_square_transform) {
+@@ -748,7 +983,7 @@ void FindBestFirstLevelDivisionForSquare(
+     // exploring 16x32 and 32x16.
+     entropy_JXJ = EstimateEntropy(acsJXJ, entropy_mul_JXJ, (bx + cx + 0) * 8,
+                                   (by + cy + 0) * 8, config, cmap_factors,
+-                                  block, scratch_space, quantized);
++                                  butteraugli_target, block, scratch_space, quantized);
+   }
+ 
+   // Test if this block should have JXK or KXJ transforms,
+@@ -911,7 +1146,7 @@ void ProcessRectACS(const CompressParams& cparams, const ACSConfig& config,
+             if ((cy | cx) % 8 == 0) {
+               FindBestFirstLevelDivisionForSquare(
+                   8, true, bx, by, cx, cy, config, cmap_factors, ac_strategy,
+-                  tx.entropy_mul, entropy_mul64X64, entropy_estimate, block,
++                  tx.entropy_mul, entropy_mul64X64, entropy_estimate, butteraugli_target, block,
+                   scratch_space, quantized);
+             }
+             continue;
+@@ -936,7 +1171,7 @@ void ProcessRectACS(const CompressParams& cparams, const ACSConfig& config,
+               FindBestFirstLevelDivisionForSquare(
+                   4, enable_32x32, bx, by, cx, cy, config, cmap_factors,
+                   ac_strategy, tx.entropy_mul, entropy_mul32X32,
+-                  entropy_estimate, block, scratch_space, quantized);
++                  entropy_estimate, butteraugli_target, block, scratch_space, quantized);
+             }
+             continue;
+           } else if (tx.type == AcStrategy::Type::DCT32X16) {
+@@ -958,7 +1193,7 @@ void ProcessRectACS(const CompressParams& cparams, const ACSConfig& config,
+             if ((cy | cx) % 2 == 0) {
+               FindBestFirstLevelDivisionForSquare(
+                   2, true, bx, by, cx, cy, config, cmap_factors, ac_strategy,
+-                  tx.entropy_mul, entropy_mul16X16, entropy_estimate, block,
++                  tx.entropy_mul, entropy_mul16X16, entropy_estimate, butteraugli_target, block,
+                   scratch_space, quantized);
+             }
+             continue;
+@@ -982,7 +1217,7 @@ void ProcessRectACS(const CompressParams& cparams, const ACSConfig& config,
+         // normal integral transform merging process.
+         TryMergeAcs(tx.type, bx, by, cx, cy, config, cmap_factors, ac_strategy,
+                     tx.entropy_mul, tx.priority, &priority[0], entropy_estimate,
+-                    block, scratch_space, quantized);
++                    butteraugli_target, block, scratch_space, quantized);
+       }
+     }
+   }
+@@ -996,7 +1231,7 @@ void ProcessRectACS(const CompressParams& cparams, const ACSConfig& config,
+       if ((cy | cx) % 2 != 0) {
+         FindBestFirstLevelDivisionForSquare(
+             2, true, bx, by, cx, cy, config, cmap_factors, ac_strategy,
+-            entropy_mul16X8, entropy_mul16X16, entropy_estimate, block,
++            entropy_mul16X8, entropy_mul16X16, entropy_estimate, butteraugli_target, block,
+             scratch_space, quantized);
+       }
+     }
+@@ -1010,7 +1245,7 @@ void ProcessRectACS(const CompressParams& cparams, const ACSConfig& config,
+       }
+       FindBestFirstLevelDivisionForSquare(
+           4, enable_32x32, bx, by, cx, cy, config, cmap_factors, ac_strategy,
+-          entropy_mul16X32, entropy_mul32X32, entropy_estimate, block,
++          entropy_mul16X32, entropy_mul32X32, entropy_estimate, butteraugli_target, block,
+           scratch_space, quantized);
+     }
+   }
+@@ -1058,6 +1293,7 @@ void AcStrategyHeuristics::Init(const Image3F& src, const Rect& rect_in,
+   config.src_rows[1] = rect_in.ConstPlaneRow(src, 1, 0);
+   config.src_rows[2] = rect_in.ConstPlaneRow(src, 2, 0);
+   config.src_stride = src.PixelsPerRow();
++  config.src_ysize = rect_in.ysize();
+ 
+   // Entropy estimate is composed of two factors:
+   //  - estimate of the number of bits that will be used by the block
+diff --git a/lib/jxl/enc_ac_strategy.h b/lib/jxl/enc_ac_strategy.h
+index 31eb73c6..fb4cb60d 100644
+--- a/lib/jxl/enc_ac_strategy.h
++++ b/lib/jxl/enc_ac_strategy.h
+@@ -37,6 +37,7 @@ struct ACSConfig {
+   size_t masking1x1_field_stride;
+   const float* JXL_RESTRICT src_rows[3];
+   size_t src_stride;
++  size_t src_ysize;
+   float info_loss_multiplier;
+   float cost_delta;
+   float zeros_mul;
