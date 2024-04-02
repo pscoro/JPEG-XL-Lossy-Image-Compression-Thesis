@@ -1,22 +1,26 @@
-# New Benchmark JPEG-XL Tool
-### (WIP)
+# JPEG XL Lossy Image Compression
+## Thesis
 
-### Usage
+## Benchmarking JPEG XL
+### Build and Run `benchmark-jpegxl` source
+Prerequisites:
+- have Rust and cargo installed
+- have Docker installed and running
+
+#### Step 1 - Set up image testsets
 ```
-$ cd benchmark-jpegxl
-$ cargo build
-$ ./target/debug/benchmark-jpegxl -h
-$ ./target/debug/benchmark-jpegxl         // runs normally, producing new results in a location like `./benchmarks/7`
-$ ./target/debug/benchmark-jpegxl -c -t   // cleans all existing temp results (`rm -rf ./benchmarks/temp/*`) and then generates new temp results in a location like `./benchmarks/temp/7`
+cd benchmark-jpegxl
+mkdir test_images
+```
+inside here you can have multiple dataset subfolders if you want. Add your input images here.
+
+#### Step 2 - Build `benchmark-jpegxl` with Rust `cargo`
+```
+cd benchmark-jpegxl
+cargo build
 ```
 
-## Old Test JXL Script
-### (deprecated)
-
-### Usage Examples
+#### Step 3 - Run the benchmarker
 ```
-$ python3 old_test_jxl.py --help    # show man page
-$ python3 old_test_jxl.py -t=/path/to/test-set/ -a -g    # run compression, decompression, and comparision stages on test-set/'s images, graph anything applicable
-$ python3 old_test_jxl.py --test_set=/path/to/test-set/ -all --graph    # run compression, decompression, and comparision stages on test-set/'s images, graph anything applicable
-$ python3 old_test_jxl.py --test_set=/path/to/test-set/ --compress    # run just the compression stage on test-set/'s images, do not graph anything
+./target/debug/benchmark-jpegxl --help
 ```
