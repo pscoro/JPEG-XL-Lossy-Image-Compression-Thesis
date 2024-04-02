@@ -651,14 +651,30 @@ impl Benchmark for JXLCompressionBenchmark {
 
                 // Execute the cjxl encoder on the current image with the current distance and
                 // effort on the provided docker manager.
-                let _ = docker_manager
+                let skip = docker_manager
                     .execute_cjxl(
                         file_path.to_string().clone(),
                         comp_image_name.clone(),
                         distance,
                         effort,
                     )
-                    .unwrap().unwrap();
+                    .unwrap_or_else(|e| {
+                        println!(
+                            "Failed to execute cjxl on image [1] {} with distance {} and effort {}: {}",
+                            file_path, distance, effort, e
+                        );
+                        Ok("skip".to_string())
+                    }).unwrap_or_else(|e| {
+                        println!(
+                            "Failed to execute cjxl on image [2] {} with distance {} and effort {}: {}",
+                            file_path, distance, effort, e
+                        );
+                        "skip".to_string()
+                    });
+
+                if skip == "skip" {
+                    continue;
+                }
 
                 // Retrieve the compressed image from the docker manager.
                 let src_path = format!("/temp/{}", comp_image_name);
@@ -899,10 +915,10 @@ impl JXLCompressionBenchmark {
 
         // Comparison calculations
         // Original file size to compressed file size ratio
-        let comp_file_size_ratio = file_size_ratio(orig_entry.file_size, comp_image_data.file_size);
+        let comp_file_size_ratio = file_size_ratio(orig_entry.file_size, comp_image_data.file_size, "comp");
 
         // Raw image size to compressed file size ratio
-        let raw_file_size_ratio = file_size_ratio(comp_image_data.raw_size, comp_image_data.file_size);
+        let raw_file_size_ratio = file_size_ratio(comp_image_data.raw_size, comp_image_data.file_size, "comp");
 
         // MSE
         let mse = calculate_mse(&orig_entry.file_path, &comp_image_data.file_path);

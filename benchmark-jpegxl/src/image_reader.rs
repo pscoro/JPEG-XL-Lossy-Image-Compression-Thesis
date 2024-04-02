@@ -170,7 +170,7 @@ impl ImageFormat {
     /// The image format of the file.
     pub fn from_file_name(file_name: &str) -> ImageFormat {
         let path = Path::new(file_name);
-        let extension = path.extension().unwrap().to_str().unwrap();
+        let extension = path.extension().unwrap_or(std::ffi::OsStr::new("")).to_str().unwrap();
         match extension {
             "jxl" => ImageFormat::JpegXl,
             "png" => ImageFormat::Png,
@@ -377,7 +377,7 @@ impl ImageReader {
         // Get the file name and extension.
         let path = Path::new(&file_path);
         let file_name = path.file_name().unwrap().to_str().unwrap().to_string();
-        let extension = path.extension().unwrap().to_str().unwrap();
+        let extension = path.extension().unwrap_or(std::ffi::OsStr::new("")).to_str().unwrap();
         if extension != "jxl" {
             panic!("Not a .jxl file");
         }
@@ -447,7 +447,7 @@ impl ImageReader {
     /// The image format of the file.
     fn get_format(file_path: &String) -> ImageFormat {
         let path = Path::new(file_path);
-        let extension = path.extension().unwrap().to_str().unwrap();
+        let extension = path.extension().unwrap_or(std::ffi::OsStr::new("")).to_str().unwrap();
         match extension {
             "jpg" | "jpeg" => ImageFormat::Jpeg,
             "png" => ImageFormat::Png,

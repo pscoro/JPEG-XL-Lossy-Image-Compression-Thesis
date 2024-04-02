@@ -3,19 +3,26 @@ use crate::{docker_manager::DockerManager, image_reader::ImageReader};
 use std::io::BufRead;
 use std::process::Command;
 
-/// Calculate the ratio of the original file size to the compressed file size.
+/// Calculate the ratio of the file sizes of the original and compressed files.
 ///
 /// # Arguments
 /// * `orig` - The original file size.
 /// * `comp` - The compressed file size.
+/// * `denom` - The denominator to use for the ratio. Either "orig" or "comp".
 ///
 /// # Returns
-/// The ratio of the original file size to the compressed file size.
-pub fn file_size_ratio(orig: usize, comp: usize) -> f64 {
-    if comp == 0 {
+/// The ratio of the file sizes. orig / comp if denom is "comp", comp / orig if denom is "orig".
+pub fn file_size_ratio(orig: usize, comp: usize, denom: &str) -> f64 {
+    // Check if denominator is 0.
+    if (orig == 0 && denom == "orig") || (comp == 0 && denom == "comp") {
         return 0.0;
     }
-    (orig as f64) / (comp as f64)
+
+    match denom {
+        "orig" => comp as f64 / orig as f64,
+        "comp" => orig as f64 / comp as f64,
+        _ => panic!("Invalid denominator for file size ratio"),
+    }
 }
 
 /// Calculate the mean squared error (MSE) between two images.
